@@ -75,8 +75,8 @@ class CrowSPairsRunner:
     def _likelihood_score(self):
         """Evaluates against the CrowS-Pairs dataset using likelihood scoring."""
         df_data = self._read_data(self._input_file)
-        df_data['prob_mask_sent1']=np.nan
-        df_data['prob_mask_sent2']=np.nan
+        df_data['prob_mask_sent1']=None
+        df_data['prob_mask_sent2']=None
         df_data['score1']=np.nan
         df_data['score2']=np.nan
 
@@ -139,10 +139,10 @@ class CrowSPairsRunner:
                     score2,list_prob_mask2 = self._average_log_probability(sent2_token_ids, template2)
                     print(list_prob_mask2)
 
-                    df_data['prob_mask_sent1'].iloc[index]=str(list_prob_mask1)
-                    df_data['prob_mask_sent2'].iloc[index]=str(list_prob_mask2)
-                    df_data['score1'].iloc[index]=np.exp(score1)
-                    df_data['score2'].iloc[index]=np.exp(score2)
+                    df_data.at[index, 'prob_mask_sent1'] = str(list_prob_mask1)
+                    df_data.at[index, 'prob_mask_sent2'] = str(list_prob_mask2)
+                    df_data.at[index, 'score1'] = np.exp(score1)
+                    df_data.at[index, 'score2'] = np.exp(score2)
 
                     score1 = round(score1, 3)
                     score2 = round(score2, 3)
@@ -176,18 +176,16 @@ class CrowSPairsRunner:
                         sent_more_score = score2
                         sent_less_score = score1
 
-                    df_score = df_score.append(
-                        {
-                            "sent_more": sent_more,
-                            "sent_less": sent_less,
-                            "sent_more_score": sent_more_score,
-                            "sent_less_score": sent_less_score,
-                            "score": pair_score,
-                            "stereo_antistereo": direction,
-                            "bias_type": bias,
-                        },
-                        ignore_index=True,
-                    )
+                    new_row = pd.DataFrame([{
+                        "sent_more": sent_more,
+                        "sent_less": sent_less,
+                        "sent_more_score": sent_more_score,
+                        "sent_less_score": sent_less_score,
+                        "score": pair_score,
+                        "stereo_antistereo": direction,
+                        "bias_type": bias,
+                    }])
+                    df_score = pd.concat([df_score, new_row], ignore_index=True)
             else: 
                 for index, data in df_data.loc[df_data['bias_type']==self._bias_type].iterrows():
                     direction = data["direction"]
@@ -219,10 +217,10 @@ class CrowSPairsRunner:
                     score2,list_prob_mask2 = self._average_log_probability(sent2_token_ids, template2)
                     print(list_prob_mask2)
 
-                    df_data['prob_mask_sent1'].iloc[index]=str(list_prob_mask1)
-                    df_data['prob_mask_sent2'].iloc[index]=str(list_prob_mask2)
-                    df_data['score1'].iloc[index]=np.exp(round(score1, 3))
-                    df_data['score2'].iloc[index]=np.exp(round(score2, 3))
+                    df_data.at[index, 'prob_mask_sent1'] = str(list_prob_mask1)
+                    df_data.at[index, 'prob_mask_sent2'] = str(list_prob_mask2)
+                    df_data.at[index, 'score1'] = np.exp(round(score1, 3))
+                    df_data.at[index, 'score2'] = np.exp(round(score2, 3))
 
 
                     score1 = round(score1, 3)
@@ -257,18 +255,16 @@ class CrowSPairsRunner:
                         sent_more_score = score2
                         sent_less_score = score1
 
-                    df_score = df_score.append(
-                        {
-                            "sent_more": sent_more,
-                            "sent_less": sent_less,
-                            "sent_more_score": sent_more_score,
-                            "sent_less_score": sent_less_score,
-                            "score": pair_score,
-                            "stereo_antistereo": direction,
-                            "bias_type": bias,
-                        },
-                        ignore_index=True,
-                    )
+                    new_row = pd.DataFrame([{
+                        "sent_more": sent_more,
+                        "sent_less": sent_less,
+                        "sent_more_score": sent_more_score,
+                        "sent_less_score": sent_less_score,
+                        "score": pair_score,
+                        "stereo_antistereo": direction,
+                        "bias_type": bias,
+                    }])
+                    df_score = pd.concat([df_score, new_row], ignore_index=True)
 
         print("=" * 100)
         print("Total examples:", N)
@@ -357,18 +353,16 @@ class CrowSPairsRunner:
                     sent_more_score = score2
                     sent_less_score = score1
 
-                df_score = df_score.append(
-                    {
-                        "sent_more": sent_more,
-                        "sent_less": sent_less,
-                        "sent_more_score": sent_more_score,
-                        "sent_less_score": sent_less_score,
-                        "score": pair_score,
-                        "stereo_antistereo": direction,
-                        "bias_type": bias,
-                    },
-                    ignore_index=True,
-                )
+                new_row = pd.DataFrame([{
+                    "sent_more": sent_more,
+                    "sent_less": sent_less,
+                    "sent_more_score": sent_more_score,
+                    "sent_less_score": sent_less_score,
+                    "score": pair_score,
+                    "stereo_antistereo": direction,
+                    "bias_type": bias,
+                }])
+                df_score = pd.concat([df_score, new_row], ignore_index=True)
 
         print("=" * 100)
         print("Total examples:", N)
@@ -527,7 +521,7 @@ class CrowSPairsRunner:
                     "direction": direction,
                     "bias_type": bias_type,
                 }
-                df_data = df_data.append(df_item, ignore_index=True)
+                df_data = pd.concat([df_data, pd.DataFrame([df_item])], ignore_index=True)
 
         return df_data
 

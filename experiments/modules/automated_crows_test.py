@@ -24,7 +24,7 @@ def test_crows(
     sample = False,
     model_name_or_path = "bert-base-uncased",
     pre_dir = os.path.realpath(os.path.join(thisdir, "..")),
-    model_class = "BertModel",
+    model_class = "BertForMaskedLM",
     save_result: bool = True
 ):
 
@@ -88,10 +88,10 @@ def _main():
         "--model_class",
         action="store",
         type=str,
-        default="BertModel",
+        default="BertForMaskedLM",
         choices=["BertModel", "AlbertModel", "RobertaModel", "GPT2Model",
                 "BertForMaskedLM", "AlbertForMaskedLM", "RobertaForMaskedLM", "GPT2LMHeadModel"],
-        help="Model class to use (e.g., BertModel).",
+        help="Model class to use (e.g., BertForMaskedLM).",
     )
     parser.add_argument(
         "--model_name_or_path",
