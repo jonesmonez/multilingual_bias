@@ -8,7 +8,10 @@ import torch
 import torch.nn.functional as F
 import pandas as pd
 import numpy as np
-from tqdm import tqdm
+try:
+    from tqdm.notebook import tqdm
+except ImportError:
+    from tqdm import tqdm
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -45,6 +48,7 @@ class CrowSPairsRunner:
         bias_type=None,
         sample="false",
         seed=0,
+        verbose=True,
     ):
         """Initializes CrowS-Pairs benchmark runner.
 
@@ -64,6 +68,7 @@ class CrowSPairsRunner:
         self._bias_type = bias_type if bias_type != "race" else "race-color"
         self.sample=sample
         self.seed=seed
+        self.verbose=verbose
 
     def __call__(self):
         if self._is_generative:
@@ -77,8 +82,8 @@ class CrowSPairsRunner:
         df_data = self._read_data(self._input_file)
         df_data['prob_mask_sent1']=None
         df_data['prob_mask_sent2']=None
-        df_data['score1']=np.nan
-        df_data['score2']=np.nan
+        df_data['score1']=None
+        df_data['score2']=None
 
 
         # Use GPU, if available.
@@ -107,6 +112,7 @@ class CrowSPairsRunner:
         N = 0
         neutral = 0
         total = len(df_data.index)
+        skipped = []
         with tqdm(total=total) as pbar:
             if self.sample=="true":
                 for index, data in df_data.loc[df_data['bias_type']==self._bias_type].sample(n=40,random_state=self.seed).iterrows():
@@ -129,27 +135,33 @@ class CrowSPairsRunner:
                         sent1_token_ids[0], sent2_token_ids[0], "diff"
                     )
 
-                    if not template1 or not template2:
-                        print(f"Skipping example {index}.")
-                        continue
-                    print(sent1)
-                    score1,list_prob_mask1 = self._average_log_probability(sent1_token_ids, template1)
-                    print(list_prob_mask1)
-                    print(sent2)
-                    score2,list_prob_mask2 = self._average_log_probability(sent2_token_ids, template2)
-                    print(list_prob_mask2)
+                    pbar.update(1)
 
-                    df_data.at[index, 'prob_mask_sent1'] = str(list_prob_mask1)
-                    df_data.at[index, 'prob_mask_sent2'] = str(list_prob_mask2)
-                    df_data.at[index, 'score1'] = np.exp(score1)
-                    df_data.at[index, 'score2'] = np.exp(score2)
+                    if not template1 or not template2:
+                        skipped.append(str(index))
+                        continue
+                    score1,list_prob_mask1 = self._average_log_probability(sent1_token_ids, template1)
+                    score2,list_prob_mask2 = self._average_log_probability(sent2_token_ids, template2)
+ 
+                    if self._bias_type is not None:
+                        pbar.set_description(f"Evaluating {self._bias_type} examples")
+                    sent1_trunc = (sent1[:27] + '...') if len(sent1) > 30 else sent1.ljust(30)
+                    sent2_trunc = (sent2[:27] + '...') if len(sent2) > 30 else sent2.ljust(30)
+                    pbar.set_postfix({
+                        "S1": sent1_trunc,
+                        "S2": sent2_trunc,
+                    })
+
+                    df_data.loc[index, 'prob_mask_sent1']=str(list_prob_mask1)
+                    df_data.loc[index, 'prob_mask_sent2']=str(list_prob_mask2)
+                    df_data.loc[index, 'score1']=np.exp(score1)
+                    df_data.loc[index, 'score2']=np.exp(score2)
 
                     score1 = round(score1, 3)
                     score2 = round(score2, 3)
 
                     N += 1
                     pair_score = 0
-                    pbar.update(1)
                     if score1 == score2:
                         neutral += 1
                     else:
@@ -207,28 +219,32 @@ class CrowSPairsRunner:
                         sent1_token_ids[0], sent2_token_ids[0], "diff"
                     )
 
+                    pbar.update(1)
+                    
                     if not template1 or not template2:
-                        print(f"Skipping example {index}.")
+                        skipped.append(str(index))
                         continue
-                    print(sent1)
                     score1,list_prob_mask1 = self._average_log_probability(sent1_token_ids, template1)
-                    print(list_prob_mask1)
-                    print(sent2)
                     score2,list_prob_mask2 = self._average_log_probability(sent2_token_ids, template2)
-                    print(list_prob_mask2)
+                    if self._bias_type is not None:
+                        pbar.set_description(f"Evaluating {self._bias_type} examples")
+                    sent1_trunc = (sent1[:27] + '...') if len(sent1) > 30 else sent1.ljust(30)
+                    sent2_trunc = (sent2[:27] + '...') if len(sent2) > 30 else sent2.ljust(30)
+                    pbar.set_postfix({
+                        "S1": sent1_trunc,
+                        "S2": sent2_trunc,
+                    })
 
-                    df_data.at[index, 'prob_mask_sent1'] = str(list_prob_mask1)
-                    df_data.at[index, 'prob_mask_sent2'] = str(list_prob_mask2)
-                    df_data.at[index, 'score1'] = np.exp(round(score1, 3))
-                    df_data.at[index, 'score2'] = np.exp(round(score2, 3))
-
+                    df_data.loc[index, 'prob_mask_sent1']=str(list_prob_mask1)
+                    df_data.loc[index, 'prob_mask_sent2']=str(list_prob_mask2)
+                    df_data.loc[index, 'score1']=np.exp(score1)
+                    df_data.loc[index, 'score2']=np.exp(score2)
 
                     score1 = round(score1, 3)
                     score2 = round(score2, 3)
 
                     N += 1
                     pair_score = 0
-                    pbar.update(1)
                     if score1 == score2:
                         neutral += 1
                     else:
@@ -266,19 +282,21 @@ class CrowSPairsRunner:
                     }])
                     df_score = pd.concat([df_score, new_row], ignore_index=True)
 
-        print("=" * 100)
-        print("Total examples:", N)
-        print("Metric score:", round((stereo_score + antistereo_score) / N * 100, 2))
-        print("Stereotype score:", round(stereo_score / total_stereo * 100, 2))
-        if antistereo_score != 0:
-            print(
-                "Anti-stereotype score:",
-                round(antistereo_score / total_antistereo * 100, 2),
-            )
-        print("Num. neutral:", round(neutral / N * 100, 2))
-        print("=" * 100)
-        print()
-        print(df_data)
+        if self.verbose:
+            print("=" * 100)
+            print("Total examples:", N)
+            if len(skipped) > 0:
+                print("Skipped examples:", ", ".join(skipped))
+            print("Metric score:", round((stereo_score + antistereo_score) / N * 100, 2))
+            print("Stereotype score:", round(stereo_score / total_stereo * 100, 2))
+            if antistereo_score != 0:
+                print(
+                    "Anti-stereotype score:",
+                    round(antistereo_score / total_antistereo * 100, 2),
+                )
+            print("Num. neutral:", round(neutral / N * 100, 2))
+            print("=" * 100)
+        
         return round((stereo_score + antistereo_score) / N * 100, 2),df_data
 
     def _likelihood_score_generative(self):
@@ -364,18 +382,20 @@ class CrowSPairsRunner:
                 }])
                 df_score = pd.concat([df_score, new_row], ignore_index=True)
 
-        print("=" * 100)
-        print("Total examples:", N)
-        print("Metric score:", round((stereo_score + antistereo_score) / N * 100, 2))
-        print("Stereotype score:", round(stereo_score / total_stereo * 100, 2))
-        if antistereo_score != 0:
-            print(
-                "Anti-stereotype score:",
-                round(antistereo_score / total_antistereo * 100, 2),
-            )
-        print("Num. neutral:", round(neutral / N * 100, 2))
-        print("=" * 100)
-        print()
+        if self.verbose:
+            print("=" * 100)
+            print("Total examples:", N)
+            if len(skipped) > 0:
+                print("Skipped examples:", ", ".join(skipped))
+            print("Metric score:", round((stereo_score + antistereo_score) / N * 100, 2))
+            print("Stereotype score:", round(stereo_score / total_stereo * 100, 2))
+            if antistereo_score != 0:
+                print(
+                    "Anti-stereotype score:",
+                    round(antistereo_score / total_antistereo * 100, 2),
+                )
+            print("Num. neutral:", round(neutral / N * 100, 2))
+            print("=" * 100)
 
         return round((stereo_score + antistereo_score) / N * 100, 2)
 
@@ -481,7 +501,6 @@ class CrowSPairsRunner:
             for i, pred_idx in enumerate(top_k_indices):
                 predicted_token = self._tokenizer.convert_ids_to_tokens([pred_idx])[0]
                 token_weight = top_k_weights[i]
-                #print("[MASK]: '%s'"%predicted_token, " | weights:", float(token_weight))
                 pred_span[predicted_token]=float(token_weight)
             preds_mask_all.append(pred_span)
 
@@ -493,9 +512,6 @@ class CrowSPairsRunner:
         """Load data into pandas DataFrame format."""
 
         df_data = pd.DataFrame(columns=["sent1", "sent2", "direction", "bias_type"])
-
-        if self._bias_type is not None:
-            print(f"Evaluating {self._bias_type} examples.")
 
         with open(input_file) as f:
             reader = csv.DictReader(f)
