@@ -25,15 +25,17 @@ def compute_bias_direction(
     lang_debias: str = "en",
     model_name: str = "BertModel",
     model_name_or_path: str = "bert-base-multilingual-uncased",
-    save_result: bool = True
+    save_result: bool = True,
+    verbose: bool = False
 ):
-    print("Computing bias subspace:")
-    print(f" - persistent_dir: {persistent_dir}")
-    print(f" - model_name_or_path: {model_name_or_path}")
-    print(f" - model: {model_name}")
-    print(f" - bias_type: {bias_type}")
-    print(f" - batch_size: {batch_size}")
-    print(f" - language debias: {lang_debias}")
+    if verbose:
+        print("Computing bias subspace:")
+        print(f" - persistent_dir: {persistent_dir}")
+        print(f" - model_name_or_path: {model_name_or_path}")
+        print(f" - model: {model_name}")
+        print(f" - bias_type: {bias_type}")
+        print(f" - batch_size: {batch_size}")
+        print(f" - language debias: {lang_debias}")
 
     data = load_sentence_debias_data(
         persistent_dir=persistent_dir,

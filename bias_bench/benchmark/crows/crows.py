@@ -228,8 +228,8 @@ class CrowSPairsRunner:
                     score2,list_prob_mask2 = self._average_log_probability(sent2_token_ids, template2)
                     if self._bias_type is not None:
                         pbar.set_description(f"Evaluating {self._bias_type} examples")
-                    sent1_trunc = (sent1[:27] + '...') if len(sent1) > 30 else sent1.ljust(30)
-                    sent2_trunc = (sent2[:27] + '...') if len(sent2) > 30 else sent2.ljust(30)
+                    sent1_trunc = (sent1[:22] + '...') if len(sent1) > 25 else sent1.ljust(25)
+                    sent2_trunc = (sent2[:22] + '...') if len(sent2) > 25 else sent2.ljust(25)
                     pbar.set_postfix({
                         "S1": sent1_trunc,
                         "S2": sent2_trunc,
@@ -469,40 +469,62 @@ class CrowSPairsRunner:
     def _average_log_probability(self, token_ids, spans):
         probs = []
         preds_mask_all=[]
-        for position in spans:
-            # Mask the position.
-            masked_token_ids = token_ids.clone().to(device)
-            masked_token_ids[:, position] = self._tokenizer.mask_token_id
+        
+        # Handle empty spans case
+        if len(spans) == 0:
+            return 0.0, []
 
-            with torch.no_grad():
-                if self._is_self_debias:
-                    # Get the logits for the masked token using self-debiasing.
-                    debiasing_prefixes = [DEBIASING_PREFIXES[self._bias_type]]
-                    hidden_states = self._model.get_token_logits_self_debiasing(
-                        masked_token_ids,
-                        debiasing_prefixes=debiasing_prefixes,
-                        decay_constant=50,
-                        epsilon=0.01,
-                    )
-                else:
-                    hidden_states = self._model(masked_token_ids)["logits"]
-                    hidden_states = hidden_states.squeeze(0)
-                    hidden_states = hidden_states[position]
+        # Create batch where each example masks a different position
+        batch_size = len(spans)
+        masked_token_ids_batch = token_ids.repeat(batch_size, 1)  # [batch_size, seq_len]
 
-            target_id = token_ids[0][position]
-            log_probs = F.log_softmax(hidden_states, dim=0)[target_id]
-            probs.append(log_probs.item())
+        # Mask different positions in each batch item
+        for i, position in enumerate(spans):
+            masked_token_ids_batch[i, position] = self._tokenizer.mask_token_id
 
-            probab=F.softmax(hidden_states,dim=0)
+        # Move entire batch to device ONCE
+        masked_token_ids_batch = masked_token_ids_batch.to(device)
 
-            top_k_weights, top_k_indices = torch.topk(probab,5 , sorted=True)
-            df_prob=pd.DataFrame()
-            pred_span={} 
-            for i, pred_idx in enumerate(top_k_indices):
-                predicted_token = self._tokenizer.convert_ids_to_tokens([pred_idx])[0]
-                token_weight = top_k_weights[i]
-                pred_span[predicted_token]=float(token_weight)
-            preds_mask_all.append(pred_span)
+        with torch.no_grad():
+            if self._is_self_debias:
+                # Get logits for masked tokens using self-debiasing (batched)
+                debiasing_prefixes = [DEBIASING_PREFIXES[self._bias_type]]
+                hidden_states_batch = self._model.get_token_logits_self_debiasing(
+                    masked_token_ids_batch,
+                    debiasing_prefixes=debiasing_prefixes,
+                    decay_constant=50,
+                    epsilon=0.01,
+                )
+                # Assuming the method returns logits ready for softmax (like original code used hidden_states directly)
+                logits_batch = hidden_states_batch
+            else:
+                # Standard model forward pass (batched)
+                logits_batch = self._model(masked_token_ids_batch)["logits"]  # [batch_size, seq_len, vocab_size]
+
+            # For each item in batch, get logits at ITS specific masked position
+            batch_indices = torch.arange(batch_size, device=device)
+            selected_logits = logits_batch[batch_indices, spans, :]  # [batch_size, vocab_size]
+
+            # Process all positions at once
+            log_probs_batch = F.log_softmax(selected_logits, dim=-1)  # [batch_size, vocab_size]
+            target_ids = token_ids[0][spans]  # [batch_size] - same token_ids[0] for all since same sentence
+            batch_log_probs = log_probs_batch[torch.arange(batch_size, device=device), target_ids]  # [batch_size]
+
+            # Get top-k predictions for all positions
+            probs_batch = F.softmax(selected_logits, dim=-1)  # [batch_size, vocab_size]
+            top_k_weights_batch, top_k_indices_batch = torch.topk(probs_batch, 5, dim=-1)  # [batch_size, 5]
+
+            # Extract results for each item in batch
+            for i in range(batch_size):
+                probs.append(batch_log_probs[i].item())
+
+                pred_span = {}
+                for k in range(5):
+                    token_idx = top_k_indices_batch[i, k].item()
+                    token_weight = top_k_weights_batch[i, k].item()
+                    predicted_token = self._tokenizer.convert_ids_to_tokens([token_idx])[0]
+                    pred_span[predicted_token] = token_weight
+                preds_mask_all.append(pred_span)
 
         score = np.mean(probs)
 
