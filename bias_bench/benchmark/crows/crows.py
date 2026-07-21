@@ -1,9 +1,6 @@
 import csv
 import difflib
 import warnings
-
-# Temporarily ignore pandas deprecation warnings.
-warnings.simplefilter(action="ignore", category=FutureWarning)
 import torch
 import torch.nn.functional as F
 import pandas as pd
@@ -12,7 +9,6 @@ try:
     from tqdm.notebook import tqdm
 except ImportError:
     from tqdm import tqdm
-
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -49,6 +45,8 @@ class CrowSPairsRunner:
         sample="false",
         seed=0,
         verbose=True,
+        lang_eval: str | None = None,
+        lang_debias: str | None = None,
     ):
         """Initializes CrowS-Pairs benchmark runner.
 
@@ -69,6 +67,8 @@ class CrowSPairsRunner:
         self.sample=sample
         self.seed=seed
         self.verbose=verbose
+        self.lang_eval=lang_eval
+        self.lang_debias=lang_debias
 
     def __call__(self):
         if self._is_generative:
@@ -91,20 +91,8 @@ class CrowSPairsRunner:
             self._model._model.to(device)
         else:
             self._model.to(device)
-
-        # Score each sentence.
-        # Each row in the dataframe has the sentid and score for pro and anti-stereo.
-        df_score = pd.DataFrame(
-            columns=[
-                "sent_more",
-                "sent_less",
-                "sent_more_score",
-                "sent_less_score",
-                "score",
-                "stereo_antistereo",
-                "bias_type",
-            ]
-        )
+        
+        df_data = self._read_data(self._input_file)
 
         total_stereo, total_antistereo = 0, 0
         stereo_score, antistereo_score = 0, 0
@@ -113,174 +101,109 @@ class CrowSPairsRunner:
         neutral = 0
         total = len(df_data.index)
         skipped = []
-        with tqdm(total=total) as pbar:
+        rows = []
+        with tqdm(total=total, leave=False) as pbar:
+            df_loop = df_data.loc[df_data['bias_type']==self._bias_type]
             if self.sample=="true":
-                for index, data in df_data.loc[df_data['bias_type']==self._bias_type].sample(n=40,random_state=self.seed).iterrows():
-                    direction = data["direction"]
-                    bias = data["bias_type"]
+                df_loop = df_loop.sample(n=40,random_state=self.seed)
+            
+            for index, data in df_loop.iterrows():
+                direction = data["direction"]
+                bias = data["bias_type"]
 
-                    assert bias == self._bias_type
+                assert bias == self._bias_type
 
-                    sent1, sent2 = data["sent1"], data["sent2"]
+                sent1, sent2, sentId = data["sent1"], data["sent2"], data["id"]
 
-                    sent1_token_ids = self._tokenizer.encode(sent1, return_tensors="pt").to(
-                        device
-                    )
-                    sent2_token_ids = self._tokenizer.encode(sent2, return_tensors="pt").to(
-                        device
-                    )
+                sent1_token_ids = self._tokenizer.encode(sent1, return_tensors="pt").to(
+                    device
+                )
+                sent2_token_ids = self._tokenizer.encode(sent2, return_tensors="pt").to(
+                    device
+                )
 
-                    # Get spans of non-changing tokens
-                    template1, template2 = _get_span(
-                        sent1_token_ids[0], sent2_token_ids[0], "diff"
-                    )
+                # Get spans of non-changing tokens
+                template1, template2 = _get_span(
+                    sent1_token_ids[0], sent2_token_ids[0], "diff"
+                )
 
-                    pbar.update(1)
+                pbar.update(1)
 
-                    if not template1 or not template2:
-                        skipped.append(str(index))
-                        continue
-                    score1,list_prob_mask1 = self._average_log_probability(sent1_token_ids, template1)
-                    score2,list_prob_mask2 = self._average_log_probability(sent2_token_ids, template2)
- 
-                    if self._bias_type is not None:
-                        pbar.set_description(f"Evaluating {self._bias_type} examples")
-                    sent1_trunc = (sent1[:27] + '...') if len(sent1) > 30 else sent1.ljust(30)
-                    sent2_trunc = (sent2[:27] + '...') if len(sent2) > 30 else sent2.ljust(30)
-                    pbar.set_postfix({
-                        "S1": sent1_trunc,
-                        "S2": sent2_trunc,
-                    })
+                if not template1 or not template2:
+                    skipped.append(str(index))
+                    continue
+                score1,list_prob_mask1 = self._average_log_probability(sent1_token_ids, template1)
+                score2,list_prob_mask2 = self._average_log_probability(sent2_token_ids, template2)
+                if self._bias_type is not None:
+                    description = "Evaluating "
+                    if self.lang_eval is not None:
+                        description += f"{self.lang_eval} "
+                    if self.lang_debias is not None:
+                        description += f"(debiased with {self.lang_debias}) "
+                    description += f"{self._bias_type} examples"
+                    pbar.set_description(description)
+                pbar.set_postfix({
+                    "CrowS Index": sentId,
+                })
 
-                    df_data.loc[index, 'prob_mask_sent1']=str(list_prob_mask1)
-                    df_data.loc[index, 'prob_mask_sent2']=str(list_prob_mask2)
-                    df_data.loc[index, 'score1']=np.exp(score1)
-                    df_data.loc[index, 'score2']=np.exp(score2)
+                df_data.loc[index, 'prob_mask_sent1']=str(list_prob_mask1)
+                df_data.loc[index, 'prob_mask_sent2']=str(list_prob_mask2)
+                df_data.loc[index, 'score1']=np.exp(score1)
+                df_data.loc[index, 'score2']=np.exp(score2)
 
-                    score1 = round(score1, 3)
-                    score2 = round(score2, 3)
+                score1 = round(score1, 3)
+                score2 = round(score2, 3)
 
-                    N += 1
-                    pair_score = 0
-                    if score1 == score2:
-                        neutral += 1
-                    else:
-                        if direction == "stereo":
-                            total_stereo += 1
-                            if score1 > score2:
-                                stereo_score += 1
-                                pair_score = 1
-                        elif direction == "antistereo":
-                            total_antistereo += 1
-                            if score2 > score1:
-                                antistereo_score += 1
-                                pair_score = 1
-
-                    sent_more, sent_less = "", ""
+                N += 1
+                pair_score = 0
+                if score1 == score2:
+                    neutral += 1
+                else:
                     if direction == "stereo":
-                        sent_more = data["sent1"]
-                        sent_less = data["sent2"]
-                        sent_more_score = score1
-                        sent_less_score = score2
-                    else:
-                        sent_more = data["sent2"]
-                        sent_less = data["sent1"]
-                        sent_more_score = score2
-                        sent_less_score = score1
+                        total_stereo += 1
+                        if score1 > score2:
+                            stereo_score += 1
+                            pair_score = 1
+                    elif direction == "antistereo":
+                        total_antistereo += 1
+                        if score2 > score1:
+                            antistereo_score += 1
+                            pair_score = 1
 
-                    new_row = pd.DataFrame([{
-                        "sent_more": sent_more,
-                        "sent_less": sent_less,
-                        "sent_more_score": sent_more_score,
-                        "sent_less_score": sent_less_score,
-                        "score": pair_score,
-                        "stereo_antistereo": direction,
-                        "bias_type": bias,
-                    }])
-                    df_score = pd.concat([df_score, new_row], ignore_index=True)
-            else: 
-                for index, data in df_data.loc[df_data['bias_type']==self._bias_type].iterrows():
-                    direction = data["direction"]
-                    bias = data["bias_type"]
+                sent_more, sent_less = "", ""
+                if direction == "stereo":
+                    sent_more = data["sent1"]
+                    sent_less = data["sent2"]
+                    sent_more_score = score1
+                    sent_less_score = score2
+                else:
+                    sent_more = data["sent2"]
+                    sent_less = data["sent1"]
+                    sent_more_score = score2
+                    sent_less_score = score1
+                
+                rows.append({
+                    "sent_more": sent_more,
+                    "sent_less": sent_less,
+                    "sent_more_score": sent_more_score,
+                    "sent_less_score": sent_less_score,
+                    "score": pair_score,
+                    "stereo_antistereo": direction,
+                    "bias_type": bias,
+                })
 
-                    assert bias == self._bias_type
-
-                    sent1, sent2 = data["sent1"], data["sent2"]
-
-                    sent1_token_ids = self._tokenizer.encode(sent1, return_tensors="pt").to(
-                        device
-                    )
-                    sent2_token_ids = self._tokenizer.encode(sent2, return_tensors="pt").to(
-                        device
-                    )
-
-                    # Get spans of non-changing tokens
-                    template1, template2 = _get_span(
-                        sent1_token_ids[0], sent2_token_ids[0], "diff"
-                    )
-
-                    pbar.update(1)
-                    
-                    if not template1 or not template2:
-                        skipped.append(str(index))
-                        continue
-                    score1,list_prob_mask1 = self._average_log_probability(sent1_token_ids, template1)
-                    score2,list_prob_mask2 = self._average_log_probability(sent2_token_ids, template2)
-                    if self._bias_type is not None:
-                        pbar.set_description(f"Evaluating {self._bias_type} examples")
-                    sent1_trunc = (sent1[:22] + '...') if len(sent1) > 25 else sent1.ljust(25)
-                    sent2_trunc = (sent2[:22] + '...') if len(sent2) > 25 else sent2.ljust(25)
-                    pbar.set_postfix({
-                        "S1": sent1_trunc,
-                        "S2": sent2_trunc,
-                    })
-
-                    df_data.loc[index, 'prob_mask_sent1']=str(list_prob_mask1)
-                    df_data.loc[index, 'prob_mask_sent2']=str(list_prob_mask2)
-                    df_data.loc[index, 'score1']=np.exp(score1)
-                    df_data.loc[index, 'score2']=np.exp(score2)
-
-                    score1 = round(score1, 3)
-                    score2 = round(score2, 3)
-
-                    N += 1
-                    pair_score = 0
-                    if score1 == score2:
-                        neutral += 1
-                    else:
-                        if direction == "stereo":
-                            total_stereo += 1
-                            if score1 > score2:
-                                stereo_score += 1
-                                pair_score = 1
-                        elif direction == "antistereo":
-                            total_antistereo += 1
-                            if score2 > score1:
-                                antistereo_score += 1
-                                pair_score = 1
-
-                    sent_more, sent_less = "", ""
-                    if direction == "stereo":
-                        sent_more = data["sent1"]
-                        sent_less = data["sent2"]
-                        sent_more_score = score1
-                        sent_less_score = score2
-                    else:
-                        sent_more = data["sent2"]
-                        sent_less = data["sent1"]
-                        sent_more_score = score2
-                        sent_less_score = score1
-
-                    new_row = pd.DataFrame([{
-                        "sent_more": sent_more,
-                        "sent_less": sent_less,
-                        "sent_more_score": sent_more_score,
-                        "sent_less_score": sent_less_score,
-                        "score": pair_score,
-                        "stereo_antistereo": direction,
-                        "bias_type": bias,
-                    }])
-                    df_score = pd.concat([df_score, new_row], ignore_index=True)
+        df_score = pd.DataFrame(
+            rows,
+            columns=[
+                "sent_more",
+                "sent_less",
+                "sent_more_score",
+                "sent_less_score",
+                "score",
+                "stereo_antistereo",
+                "bias_type",
+            ],
+        )
 
         if self.verbose:
             print("=" * 100)
@@ -308,28 +231,14 @@ class CrowSPairsRunner:
         else:
             self._model.to(device)
 
-        # Score each sentence.
-        # Each row in the dataframe has the sentid and score for pro and anti-stereo.
-        df_score = pd.DataFrame(
-            columns=[
-                "sent_more",
-                "sent_less",
-                "sent_more_score",
-                "sent_less_score",
-                "score",
-                "stereo_antistereo",
-                "bias_type",
-            ]
-        )
-
         total_stereo, total_antistereo = 0, 0
         stereo_score, antistereo_score = 0, 0
 
         N = 0
         neutral = 0
         total = len(df_data.index)
-
-        with tqdm(total=total) as pbar:
+        rows = []
+        with tqdm(total=total, leave=False) as pbar:
             for index, data in df_data.iterrows():
                 direction = data["direction"]
                 bias = data["bias_type"]
@@ -371,7 +280,7 @@ class CrowSPairsRunner:
                     sent_more_score = score2
                     sent_less_score = score1
 
-                new_row = pd.DataFrame([{
+                rows.append({
                     "sent_more": sent_more,
                     "sent_less": sent_less,
                     "sent_more_score": sent_more_score,
@@ -379,9 +288,21 @@ class CrowSPairsRunner:
                     "score": pair_score,
                     "stereo_antistereo": direction,
                     "bias_type": bias,
-                }])
-                df_score = pd.concat([df_score, new_row], ignore_index=True)
-
+                })
+                
+        df_score = pd.DataFrame(
+            rows,
+            columns=[
+                "sent_more",
+                "sent_less",
+                "sent_more_score",
+                "sent_less_score",
+                "score",
+                "stereo_antistereo",
+                "bias_type",
+            ],
+        )
+                
         if self.verbose:
             print("=" * 100)
             print("Total examples:", N)
@@ -531,38 +452,28 @@ class CrowSPairsRunner:
         return score,preds_mask_all
 
     def _read_data(self, input_file):
-        """Load data into pandas DataFrame format."""
+        df = pd.read_csv(
+            input_file,
+            usecols=["id", "sent_more", "sent_less", "stereo_antistereo", "bias_type"],
+            keep_default_na=False,
+            dtype=str,
+        )
 
-        df_data = pd.DataFrame(columns=["sent1", "sent2", "direction", "bias_type"])
+        if self._bias_type is not None:
+            bias_key = "race-color" if self._bias_type == "race" else self._bias_type
+            df = df[df["bias_type"] == bias_key]
 
-        with open(input_file) as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                direction, gold_bias = "_", "_"
-                direction = row["stereo_antistereo"]
-                bias_type = row["bias_type"]
+        df = df.rename(
+            columns={
+                "sent_more": "sent1",
+                "sent_less": "sent2",
+                "stereo_antistereo": "direction",
+            }
+        )
 
-                if self._bias_type is not None and bias_type != self._bias_type:
-                    continue
+        df = df[["sent1", "sent2", "direction", "bias_type", "id"]]
 
-                sent1, sent2 = "", ""
-                if direction == "stereo":
-                    sent1 = row["sent_more"]
-                    sent2 = row["sent_less"]
-                else:
-                    sent1 = row["sent_less"]
-                    sent2 = row["sent_more"]
-
-                df_item = {
-                    "sent1": sent1,
-                    "sent2": sent2,
-                    "direction": direction,
-                    "bias_type": bias_type,
-                }
-                df_data = pd.concat([df_data, pd.DataFrame([df_item])], ignore_index=True)
-
-        return df_data
-
+        return df
 
 def _get_span(seq1, seq2, operation):
     """This function extract spans that are shared between two sequences."""

@@ -1,9 +1,11 @@
+import os
+os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
 import torch
 import transformers
 transformers.logging.set_verbosity_error()
 from functools import lru_cache
 from bias_bench.model import models
-from bias_bench.util import _is_generative, _is_self_debias 
+from bias_bench.util import _is_generative, _is_self_debias
 
 
 class CrowSPairsRunnerWrapper:
@@ -36,6 +38,7 @@ class CrowSPairsRunnerWrapper:
     def run_plain(
         self,
         path_to_crows: str,
+        lang_eval: str,
         bias_type: str,
         sample = False,
         save_dir = ".",
@@ -59,6 +62,7 @@ class CrowSPairsRunnerWrapper:
             model=self.model_base,
             tokenizer=self.tokenizer,
             input_file=path_to_crows,
+            lang_eval=lang_eval,
             bias_type=bias_type,
             is_generative=_is_generative(self.model_base),
             sample=sample,
@@ -70,11 +74,10 @@ class CrowSPairsRunnerWrapper:
             experiment_id = generate_experiment_id(
                 name="automated_test",
                 model=self.model_class_base,
-                model_name_or_path=args.model_name_or_path,
-                bias_type=args.bias_type,
-                sample=self.sample,
-                seed=args.seed,
-                lang_eval=args.lang_eval,
+                model_name_or_path=self.model_name_or_path,
+                bias_type=bias_type,
+                sample=sample,
+                lang_eval=lang_eval,
             )
 
             results_dir = f"{save_dir}/results/automated_crows_test"
@@ -172,6 +175,8 @@ class CrowSPairsRunnerWrapper:
             model=debias_model,
             tokenizer=tokenizer,
             input_file=path_to_crows,
+            lang_eval=lang_eval,
+            lang_debias=lang_debias,
             bias_type=bias_type,
             is_generative=_is_generative(debias_model),
             is_self_debias=_is_self_debias(debias_model),
