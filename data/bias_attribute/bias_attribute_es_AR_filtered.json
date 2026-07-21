@@ -1,0 +1,56 @@
+{
+  "gender": [
+    [
+      "mujeres",
+      "hombres"
+    ],
+    [
+      "chica",
+      "chico"
+    ],
+    [
+      "ella",
+      "él"
+    ],
+    [
+      "chicos",
+      "chicas"
+    ],
+    [
+      "mujer",
+      "hombre"
+    ]
+  ],
+  "race-color": [
+    [
+      "asiáticos",
+      "occidentales"
+    ],
+    [
+      "mapuches",
+      "porteños"
+    ],
+    [
+      "bolivianos",
+      "europeos"
+    ],
+    [
+      "chinos",
+      "europeos"
+    ],
+    [
+      "negros",
+      "blancos"
+    ],
+    [
+      "asiáticos",
+      "europeos"
+    ]
+  ],
+  "religion": [
+    [
+      "musulmanes",
+      "cristianos"
+    ]
+  ]
+}

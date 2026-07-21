@@ -1,0 +1,50 @@
+{
+  "gender": [
+    [
+      "he",
+      "she"
+    ],
+    [
+      "man",
+      "woman"
+    ],
+    [
+      "his",
+      "her"
+    ],
+    [
+      "Women",
+      "Men"
+    ],
+    [
+      "him",
+      "her"
+    ],
+    [
+      "female",
+      "male"
+    ],
+    [
+      "wife",
+      "husband"
+    ],
+    [
+      "Girls",
+      "Boys"
+    ]
+  ],
+  "race-color": [
+    [
+      "black",
+      "white"
+    ],
+    [
+      "Blacks",
+      "Whites"
+    ],
+    [
+      "Native",
+      "White"
+    ]
+  ]
+}
