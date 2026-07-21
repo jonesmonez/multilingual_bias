@@ -7,6 +7,5 @@ datasets
 accelerate
 numpy
 pandas
-argparse
 tqdm
-
+IPython
