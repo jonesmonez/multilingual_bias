@@ -5,11 +5,10 @@ import torch
 import transformers
 transformers.logging.set_verbosity_error()
 import numpy as np
-# try:
-#     from tqdm.notebook import tqdm
-# except ImportError:
-#     from tqdm import tqdm
-from tqdm import tqdm
+try:
+    from tqdm.notebook import tqdm
+except ImportError:
+    from tqdm import tqdm
 from sklearn.decomposition import PCA
 
 from bias_bench.model import models
@@ -49,6 +48,7 @@ class SubspaceCalculator:
         path_to_dataset,
         n_max_sent = 250000,
     ):
+        self.lang_debias = lang_debias
         self.data = _GenericDataset(
             path_to_bias_attributes=path_to_bias_attributes,
             lang_debias=lang_debias,
@@ -118,6 +118,12 @@ class SubspaceCalculator:
             self.all_embeddings_male.append(embedding_male.cpu().numpy())
             self.all_embeddings_female.append(embedding_female.cpu().numpy())
 
+        if len(self.all_embeddings_male) == 0 or len(self.all_embeddings_female) == 0:
+            print("Warning: No embeddings found for gender subspace computation. Skipping.")
+            self.all_embeddings_male = None
+            self.all_embeddings_female = None
+            return None
+
         self.all_embeddings_male = np.concatenate(self.all_embeddings_male, axis=0)
         self.all_embeddings_female = np.concatenate(self.all_embeddings_female, axis=0)
 
@@ -168,8 +174,8 @@ class SentenceDebiasWrapper(SubspaceCalculator):
         bias_direction = torch.tensor(pca.components_[0], dtype=torch.float32)
         
         if self.save_result:
-            os.makedirs(f"{save_path}results/sentence/", exist_ok=True)
-            torch.save(bias_direction, f"{save_path}results/sentence/gender_subspace.pt")
+            os.makedirs(f"{save_path}results/", exist_ok=True)
+            torch.save(bias_direction, f"{save_path}results/gender_sentence_subspace_{self.lang_debias}.pt")
 
         return bias_direction
 
@@ -282,8 +288,8 @@ class SentenceDebiasWrapper(SubspaceCalculator):
         bias_direction = torch.tensor(pca.components_[0], dtype=torch.float32)
 
         if self.save_result:
-            os.makedirs(f"{save_path}results/sentence/", exist_ok=True)
-            torch.save(bias_direction, f"{save_path}results/sentence/racecolor_subspace.pt")
+            os.makedirs(f"{save_path}results/", exist_ok=True)
+            torch.save(bias_direction, f"{save_path}results/racecolor_sentence_subspace_{self.lang_debias}.pt")
 
         return bias_direction
 
@@ -398,8 +404,8 @@ class SentenceDebiasWrapper(SubspaceCalculator):
         bias_direction = torch.tensor(pca.components_[0], dtype=torch.float32)
 
         if self.save_result:
-            os.makedirs(f"{save_path}results/sentence/", exist_ok=True)
-            torch.save(bias_direction, f"{save_path}results/sentence/religion_subspace.pt")
+            os.makedirs(f"{save_path}results/", exist_ok=True)
+            torch.save(bias_direction, f"{save_path}results/religion_sentence_subspace_{self.lang_debias}.pt")
 
         return bias_direction
 
@@ -429,19 +435,23 @@ class DensrayDebiasWrapper(SubspaceCalculator):
             
         super().compute_gender_subspace()
         
+        if self.all_embeddings_male is None or self.all_embeddings_female is None:
+            print("Warning: No embeddings found for DensRay gender subspace. Skipping.")
+            return None
+        
         print('Computing the bias dimensions')
         densray = DensrayDebiasWrapper.DensRay(torch.from_numpy(self.all_embeddings_male),torch.from_numpy(self.all_embeddings_female))
         densray.fit()
         
         result = {
-            "eigenvecs": densray.eigenvecs,
+            "eigenvecs": densray.eigvecs,
             "mean": densray.mean,
             "std": densray.std
         }
 
         if self.save_result:
-            os.makedirs(f"{save_path}results/densray", exist_ok=True)
-            torch.save(result, f"{save_path}results/densray/gender_subspace.pt")
+            os.makedirs(f"{save_path}results", exist_ok=True)
+            torch.save(result, f"{save_path}results/gender_densray_subspace_{self.lang_debias}.pt")
             
         return result
 
@@ -528,7 +538,7 @@ class DensrayDebiasWrapper(SubspaceCalculator):
             """Given A, this function computes the actual Transformation.
             It essentially just does an eigenvector decomposition.
             """
-            eigvals, eigvecs = self.A.symeig(eigenvectors=True)
+            eigvals, eigvecs = torch.linalg.eigh(self.A, UPLO='U')
             # need to sort the eigenvalues
             idx = eigvals.argsort(descending=True)
             eigvals, self.eigvecs = eigvals[idx], eigvecs[:, idx]

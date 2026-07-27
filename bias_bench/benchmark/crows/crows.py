@@ -63,7 +63,7 @@ class CrowSPairsRunner:
         self._is_generative = is_generative
         self._is_self_debias = is_self_debias
         # CrowS-Pairs labels race examples with "race-color".
-        self._bias_type = bias_type if bias_type != "race" else "race-color"
+        self._bias_type = bias_type
         self.sample=sample
         self.seed=seed
         self.verbose=verbose

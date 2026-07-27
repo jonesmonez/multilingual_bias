@@ -150,7 +150,7 @@ class CrowSPairsRunnerWrapper:
             model_class = self.model_class_debias
         
         if verbose:
-            print("Running CrowS‑Pairs benchmark:")
+            print("Running CrowS-Pairs benchmark:")
             print(f" - save_dir: {save_dir}")
             print(f" - model: {model_class}")
             print(f" - model_name_or_path: {self.model_name_or_path}")

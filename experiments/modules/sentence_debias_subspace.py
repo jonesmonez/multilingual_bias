@@ -54,7 +54,7 @@ def compute_bias_direction(
         bias_direction = compute_gender_subspace(
             data, model, tokenizer, batch_size=batch_size
         )
-    elif bias_type == "race":
+    elif bias_type == "race-color":
         bias_direction = compute_race_subspace(
             data, model, tokenizer, batch_size=batch_size
         )
