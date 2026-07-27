@@ -220,7 +220,9 @@ class CrowSPairsRunner:
             print("Num. neutral:", round(neutral / N * 100, 2))
             print("=" * 100)
         
-        return round((stereo_score + antistereo_score) / N * 100, 2),df_data
+        if N == 0:
+            return 0.0, df_data
+        return round((stereo_score + antistereo_score) / N * 100, 2), df_data
 
     def _likelihood_score_generative(self):
         df_data = self._read_data(self._input_file)
@@ -306,8 +308,6 @@ class CrowSPairsRunner:
         if self.verbose:
             print("=" * 100)
             print("Total examples:", N)
-            if len(skipped) > 0:
-                print("Skipped examples:", ", ".join(skipped))
             print("Metric score:", round((stereo_score + antistereo_score) / N * 100, 2))
             print("Stereotype score:", round(stereo_score / total_stereo * 100, 2))
             if antistereo_score != 0:
@@ -318,6 +318,8 @@ class CrowSPairsRunner:
             print("Num. neutral:", round(neutral / N * 100, 2))
             print("=" * 100)
 
+        if N == 0:
+            return 0.0, df_data
         return round((stereo_score + antistereo_score) / N * 100, 2)
 
     def _joint_log_probability(self, tokens):
