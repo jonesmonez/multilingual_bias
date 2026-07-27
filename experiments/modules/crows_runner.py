@@ -93,7 +93,7 @@ class CrowSPairsRunnerWrapper:
 
         return results, df_data_with_masks
     
-    @lru_cache(maxsize=None)
+    @lru_cache(maxsize=4)
     def _build_debias_model(
         self,
         model_class_str: str,
