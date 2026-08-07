@@ -25,12 +25,28 @@
             "tías"
         ],
         [
+            "niño",
+            "niña"
+        ],
+        [
             "chico",
             "chica"
         ],
         [
+            "muchacho",
+            "muchacha"
+        ],
+        [
+            "niños",
+            "niñas"
+        ],
+        [
             "chicos",
             "chicas"
+        ],
+        [
+            "muchachos",
+            "muchachas"
         ],
         [
             "novio",
@@ -66,11 +82,11 @@
         ],
         [
             "tipo",
-            "chica"
+            "tipa"
         ],
         [
             "tipos",
-            "chicas"
+            "tipas"
         ],
         [
             "papá",
@@ -105,28 +121,44 @@
             "madres"
         ],
         [
+            "macho",
+            "hembra"
+        ],
+        [
             "masculino",
             "femenino"
+        ],
+        [
+            "hombre",
+            "mujer"
+        ],
+        [
+            "machos",
+            "hembras"
         ],
         [
             "masculinos",
             "femeninos"
         ],
         [
-            "chico",
-            "chica"
-        ],
-        [
-            "chicos",
-            "chicas"
+            "hombres",
+            "mujeres"
         ],
         [
             "caballero",
             "dama"
         ],
         [
+            "señor",
+            "señora"
+        ],
+        [
             "caballeros",
             "damas"
+        ],
+        [
+            "señores",
+            "señoras"
         ],
         [
             "nieto",
@@ -137,14 +169,6 @@
             "nietas"
         ],
         [
-            "chico",
-            "chica"
-        ],
-        [
-            "chicos",
-            "chicas"
-        ],
-        [
             "él",
             "ella"
         ],
@@ -153,20 +177,32 @@
             "ella misma"
         ],
         [
-            "él",
-            "ella"
+            "sí mismo",
+            "sí misma"
         ],
         [
-            "su",
-            "su"
+            "lo",
+            "la"
+        ],
+        [
+            "suyo",
+            "suya"
         ],
         [
             "esposo",
             "esposa"
         ],
         [
+            "marido",
+            "mujer"
+        ],
+        [
             "esposos",
             "esposas"
+        ],
+        [
+            "maridos",
+            "mujeres"
         ],
         [
             "rey",
@@ -177,36 +213,20 @@
             "reinas"
         ],
         [
-            "señor",
-            "señora"
-        ],
-        [
-            "señores",
-            "señoras"
-        ],
-        [
-            "señor",
-            "señora"
-        ],
-        [
-            "hombre",
-            "mujer"
-        ],
-        [
-            "hombres",
-            "mujeres"
+            "lord",
+            "lady"
         ],
         [
             "señor",
             "señorita"
         ],
         [
-            "Sr.",
-            "Sra."
+            "sr",
+            "sra"
         ],
         [
-            "Sr.",
-            "Srta."
+            "sr",
+            "srta"
         ],
         [
             "policía",
@@ -221,8 +241,16 @@
             "princesas"
         ],
         [
+            "vocero",
+            "vocera"
+        ],
+        [
             "portavoz",
             "portavoz"
+        ],
+        [
+            "voceros",
+            "voceras"
         ],
         [
             "portavoces",
@@ -236,9 +264,19 @@
             "musulmán"
         ],
         [
+            "judía",
+            "cristiana",
+            "musulmana"
+        ],
+        [
             "judíos",
             "cristianos",
             "musulmanes"
+        ],
+        [
+            "judías",
+            "cristianas",
+            "musulmanas"
         ],
         [
             "torá",
@@ -268,9 +306,19 @@
             "asiático"
         ],
         [
+            "negra",
+            "caucásica",
+            "asiática"
+        ],
+        [
             "africano",
             "caucásico",
             "asiático"
+        ],
+        [
+            "africana",
+            "caucásica",
+            "asiática"
         ],
         [
             "negro",
@@ -278,19 +326,24 @@
             "asiático"
         ],
         [
-            "África",
-            "América",
-            "Asia"
+            "negra",
+            "blanca",
+            "asiática"
         ],
         [
-            "África",
-            "América",
-            "China"
+            "áfrica",
+            "américa",
+            "asia"
         ],
         [
-            "África",
-            "Europa",
-            "Asia"
+            "áfrica",
+            "américa",
+            "china"
+        ],
+        [
+            "áfrica",
+            "europa",
+            "asia"
         ]
     ]
 }

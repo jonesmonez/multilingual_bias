@@ -1,5 +1,5 @@
 {
-    "gender":[
+    "gender": [
         [
             "attore",
             "attrice"
@@ -29,8 +29,16 @@
             "ragazza"
         ],
         [
+            "bambino",
+            "bambina"
+        ],
+        [
             "ragazzi",
             "ragazze"
+        ],
+        [
+            "bambini",
+            "bambine"
         ],
         [
             "sposo",
@@ -49,12 +57,12 @@
             "sorelle"
         ],
         [
-            "uomo d'affari",
-            "donna d'affari"
+            "imprenditore",
+            "imprenditrice"
         ],
         [
-            "uomini d'affari",
-            "donne d'affari"
+            "imprenditori",
+            "imprenditrici"
         ],
         [
             "presidente",
@@ -65,15 +73,27 @@
             "presidentesse"
         ],
         [
+            "tizio",
+            "tizia"
+        ],
+        [
             "tipo",
-            "ragazza"
+            "tipa"
+        ],
+        [
+            "tizi",
+            "tizie"
         ],
         [
             "tipi",
-            "ragazze"
+            "tipe"
         ],
         [
             "papà",
+            "mamma"
+        ],
+        [
+            "babbo",
             "mamma"
         ],
         [
@@ -81,11 +101,11 @@
             "mamme"
         ],
         [
-            "papino",
+            "paparino",
             "mammina"
         ],
         [
-            "papini",
+            "paparini",
             "mammine"
         ],
         [
@@ -109,56 +129,64 @@
             "femmina"
         ],
         [
+            "maschile",
+            "femminile"
+        ],
+        [
             "maschi",
             "femmine"
         ],
         [
-            "ragazzo",
-            "ragazza"
-        ],
-        [
-            "ragazzi",
-            "ragazze"
+            "gentiluomo",
+            "gentildonna"
         ],
         [
             "signore",
             "signora"
         ],
         [
+            "gentiluomini",
+            "gentildonne"
+        ],
+        [
             "signori",
             "signore"
         ],
         [
-            "nipote",
-            "nipote"
+            "nipotino",
+            "nipotina"
         ],
         [
-            "nipoti",
-            "nipoti"
-        ],
-        [
-            "ragazzo",
-            "ragazza"
-        ],
-        [
-            "ragazzi",
-            "ragazze"
+            "nipotini",
+            "nipotine"
         ],
         [
             "lui",
             "lei"
+        ],
+        [
+            "egli",
+            "essa"
         ],
         [
             "sé stesso",
             "sé stessa"
         ],
         [
-            "lui",
-            "lei"
+            "lo",
+            "la"
+        ],
+        [
+            "gli",
+            "le"
         ],
         [
             "suo",
             "sua"
+        ],
+        [
+            "suoi",
+            "sue"
         ],
         [
             "marito",
@@ -177,16 +205,12 @@
             "regine"
         ],
         [
-            "signore",
-            "dama"
-        ],
-        [
-            "signori",
-            "dame"
+            "lord",
+            "lady"
         ],
         [
             "signore",
-            "signora"
+            "signorina"
         ],
         [
             "uomo",
@@ -197,16 +221,12 @@
             "donne"
         ],
         [
-            "signore",
+            "signor",
+            "signora"
+        ],
+        [
+            "signor",
             "signorina"
-        ],
-        [
-            "sig.",
-            "sig.ra"
-        ],
-        [
-            "sig.",
-            "sig.na"
         ],
         [
             "poliziotto",
@@ -221,24 +241,34 @@
             "principesse"
         ],
         [
-            "portavoce",
-            "portavoce"
+            "relatore",
+            "relatrice"
         ],
         [
             "portavoce",
             "portavoce"
         ]
     ],
-    "religion":[
+    "religion": [
         [
             "ebreo",
             "cristiano",
             "musulmano"
         ],
         [
+            "ebrea",
+            "cristiana",
+            "musulmana"
+        ],
+        [
             "ebrei",
             "cristiani",
             "musulmani"
+        ],
+        [
+            "ebree",
+            "cristiane",
+            "musulmane"
         ],
         [
             "torah",
@@ -256,16 +286,26 @@
             "imam"
         ],
         [
+            "rabbino",
+            "sacerdote",
+            "imam"
+        ],
+        [
             "ebraismo",
             "cristianesimo",
             "islam"
         ]
     ],
-    "race-color":[
+    "race-color": [
         [
             "nero",
             "caucasico",
             "asiatico"
+        ],
+        [
+            "nera",
+            "caucasica",
+            "asiatica"
         ],
         [
             "africano",
@@ -273,24 +313,34 @@
             "asiatico"
         ],
         [
+            "africana",
+            "caucasica",
+            "asiatica"
+        ],
+        [
             "nero",
             "bianco",
             "asiatico"
         ],
         [
-            "Africa",
-            "America",
-            "Asia"
+            "nera",
+            "bianca",
+            "asiatica"
         ],
         [
-            "Africa",
-            "America",
-            "Cina"
+            "africa",
+            "america",
+            "asia"
         ],
         [
-            "Africa",
-            "Europa",
-            "Asia"
+            "africa",
+            "america",
+            "cina"
+        ],
+        [
+            "africa",
+            "europa",
+            "asia"
         ]
     ]
 }

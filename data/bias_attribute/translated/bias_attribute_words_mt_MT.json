@@ -9,6 +9,10 @@
             "attriċi"
         ],
         [
+            "atturi",
+            "attriċijiet"
+        ],
+        [
             "avjatur",
             "avjatriċi"
         ],
@@ -17,28 +21,40 @@
             "avjatriċi"
         ],
         [
+            "avjaturi",
+            "avjatriċijiet"
+        ],
+        [
             "ziju",
             "zija"
         ],
         [
-            "zijiet",
-            "zijiet"
+            "zijiet subien",
+            "zijiet bniet"
         ],
         [
             "tifel",
             "tifla"
         ],
         [
+            "ġuvni",
+            "tfajla"
+        ],
+        [
             "subien",
             "bniet"
+        ],
+        [
+            "ġuvintur",
+            "tfajliet"
         ],
         [
             "għarus",
             "għarusa"
         ],
         [
-            "għarajjes",
-            "għarajjes"
+            "għarusin",
+            "għarusiet"
         ],
         [
             "ħu",
@@ -53,44 +69,60 @@
             "negozjanta"
         ],
         [
-            "negozjanti",
-            "negozjanti nisa"
+            "raġel tan negozju",
+            "mara tan negozju"
+        ],
+        [
+            "negozjanti subien",
+            "negozjanti bniet"
+        ],
+        [
+            "irġiel tan negozju",
+            "nisa tan negozju"
         ],
         [
             "president",
-            "presidentessa"
+            "presidenta"
         ],
         [
-            "presidenti",
-            "presidenti nisa"
+            "presidenti subien",
+            "presidenti bniet"
         ],
         [
-            "raġel",
+            "ġuvni",
             "tfajla"
         ],
         [
-            "rġiel",
+            "ġuvintur",
             "tfajliet"
         ],
         [
             "papà",
-            "omm"
+            "mamma"
         ],
         [
-            "papijiet",
-            "ommijiet"
+            "papà",
+            "mamà"
         ],
         [
-            "missier",
-            "omm"
+            "papaijiet",
+            "mammi"
         ],
         [
-            "missirijiet",
-            "ommijiet"
+            "papà",
+            "mami"
+        ],
+        [
+            "papaijiet",
+            "mammi"
         ],
         [
             "iben",
             "bint"
+        ],
+        [
+            "subien",
+            "bniet"
         ],
         [
             "ulied subien",
@@ -109,24 +141,28 @@
             "mara"
         ],
         [
-            "rġiel",
-            "nisa"
-        ],
-        [
-            "raġel",
-            "mara"
+            "maskil",
+            "femminil"
         ],
         [
             "irġiel",
             "nisa"
         ],
         [
+            "ġuvni",
+            "tfajla"
+        ],
+        [
+            "ġuvintur",
+            "tfajliet"
+        ],
+        [
             "sinjur",
             "sinjura"
         ],
         [
-            "sinjuri",
-            "sinjuri"
+            "sinjuri subien",
+            "sinjuri bniet"
         ],
         [
             "neputi",
@@ -141,7 +177,7 @@
             "tifla"
         ],
         [
-            "rġiel",
+            "irġiel",
             "bniet"
         ],
         [
@@ -149,8 +185,12 @@
             "hi"
         ],
         [
-            "hu nnifsu",
-            "hi nnifisha"
+            "huwa",
+            "hija"
+        ],
+        [
+            "innifsu",
+            "innifsha"
         ],
         [
             "lilu",
@@ -165,23 +205,27 @@
             "mara"
         ],
         [
-            "rġiel",
+            "żewġ",
+            "żewġa"
+        ],
+        [
+            "irġiel",
             "nisa"
         ],
         [
-            "sultan",
+            "re",
             "reġina"
         ],
         [
-            "slaten",
+            "rejiet",
             "reġini"
         ],
         [
-            "sid",
+            "mulej",
             "sinjura"
         ],
         [
-            "sidien",
+            "mulejiet",
             "sinjuri"
         ],
         [
@@ -193,7 +237,7 @@
             "mara"
         ],
         [
-            "rġiel",
+            "irġiel",
             "nisa"
         ],
         [
@@ -202,14 +246,18 @@
         ],
         [
             "sur",
-            "sinjura"
+            "sra"
         ],
         [
             "sur",
             "sinjura"
         ],
         [
-            "pulizija",
+            "sur",
+            "sinjorina"
+        ],
+        [
+            "pulizija raġel",
             "pulizija mara"
         ],
         [
@@ -225,25 +273,30 @@
             "kelliema"
         ],
         [
-            "kelliema",
-            "kelliema nisa"
+            "kelliema subien",
+            "kelliema bniet"
         ]
     ],
     "religion": [
         [
-            "Lhudi",
-            "Kristjan",
-            "Musulman"
+            "lhudi",
+            "nisrani",
+            "musulman"
         ],
         [
-            "Lhud",
-            "Kristjani",
-            "Musulmani"
+            "lhud",
+            "insara",
+            "musulmani"
         ],
         [
-            "Tora",
-            "Bibbja",
-            "Koran"
+            "tora",
+            "bibbja",
+            "kuran"
+        ],
+        [
+            "torah",
+            "bibbja",
+            "quran"
         ],
         [
             "sinagoga",
@@ -256,41 +309,41 @@
             "imam"
         ],
         [
-            "Ġudaiżmu",
-            "Kristjaneżmu",
-            "Islam"
+            "ġudaiżmu",
+            "kristjaneżmu",
+            "islam"
         ]
     ],
     "race-color": [
         [
             "iswed",
-            "Kawkasuż",
-            "Asjatiku"
+            "kawkażiku",
+            "ażjatiku"
         ],
         [
-            "Afrikan",
-            "Kawkasuż",
-            "Asjatiku"
+            "affrikan",
+            "kawkażiku",
+            "ażjatiku"
         ],
         [
             "iswed",
             "abjad",
-            "Asjatiku"
+            "ażjatiku"
         ],
         [
-            "Afrika",
-            "Amerika",
-            "Asja"
+            "affrika",
+            "amerika",
+            "asja"
         ],
         [
-            "Afrika",
-            "Amerika",
-            "Ċina"
+            "affrika",
+            "amerika",
+            "ċina"
         ],
         [
-            "Afrika",
-            "Ewropa",
-            "Asja"
+            "affrika",
+            "ewropa",
+            "asja"
         ]
     ]
 }

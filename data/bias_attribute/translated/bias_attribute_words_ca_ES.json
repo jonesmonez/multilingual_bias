@@ -21,12 +21,28 @@
             "tia"
         ],
         [
+            "tiet",
+            "tieta"
+        ],
+        [
             "oncles",
             "ties"
         ],
         [
+            "tiets",
+            "tietes"
+        ],
+        [
+            "noi",
+            "noia"
+        ],
+        [
             "nen",
             "nena"
+        ],
+        [
+            "nois",
+            "noies"
         ],
         [
             "nens",
@@ -49,12 +65,12 @@
             "germanes"
         ],
         [
-            "home de negocis",
-            "dona de negocis"
+            "empresari",
+            "empresària"
         ],
         [
-            "homes de negocis",
-            "dones de negocis"
+            "empresaris",
+            "empresàries"
         ],
         [
             "president",
@@ -65,28 +81,40 @@
             "presidentes"
         ],
         [
-            "noi",
-            "noia"
+            "tio",
+            "tia"
         ],
         [
-            "nois",
-            "noies"
+            "tios",
+            "ties"
         ],
         [
             "pare",
             "mare"
         ],
         [
-            "pares",
-            "mares"
+            "papa",
+            "mama"
         ],
         [
             "papà",
             "mamà"
         ],
         [
-            "papàs",
-            "mamàs"
+            "pares",
+            "mares"
+        ],
+        [
+            "papes",
+            "mames"
+        ],
+        [
+            "papi",
+            "mami"
+        ],
+        [
+            "papis",
+            "mamis"
         ],
         [
             "fill",
@@ -97,52 +125,36 @@
             "filles"
         ],
         [
-            "pare",
-            "mare"
+            "mascle",
+            "femella"
         ],
         [
-            "pares",
-            "mares"
-        ],
-        [
-            "masculí",
-            "femení"
-        ],
-        [
-            "masculins",
-            "femenins"
-        ],
-        [
-            "noi",
-            "noia"
-        ],
-        [
-            "nois",
-            "noies"
+            "mascles",
+            "femelles"
         ],
         [
             "cavaller",
             "dama"
         ],
         [
+            "senyor",
+            "senyora"
+        ],
+        [
             "cavallers",
             "dames"
         ],
         [
-            "nét",
-            "néta"
+            "senyors",
+            "senyores"
         ],
         [
-            "néts",
-            "nétes"
+            "net",
+            "neta"
         ],
         [
-            "noi",
-            "noia"
-        ],
-        [
-            "nois",
-            "noies"
+            "nets",
+            "netes"
         ],
         [
             "ell",
@@ -153,8 +165,8 @@
             "ella mateixa"
         ],
         [
-            "ell",
-            "ella"
+            "el",
+            "la"
         ],
         [
             "seu",
@@ -162,10 +174,18 @@
         ],
         [
             "marit",
+            "dona"
+        ],
+        [
+            "espòs",
             "esposa"
         ],
         [
             "marits",
+            "dones"
+        ],
+        [
+            "esposos",
             "esposes"
         ],
         [
@@ -181,14 +201,6 @@
             "dama"
         ],
         [
-            "senyors",
-            "dames"
-        ],
-        [
-            "senyor",
-            "senyora"
-        ],
-        [
             "home",
             "dona"
         ],
@@ -201,16 +213,20 @@
             "senyoreta"
         ],
         [
-            "Sr.",
-            "Sra."
+            "sr",
+            "sra"
         ],
         [
-            "Sr.",
-            "Sra."
+            "sr",
+            "srta"
         ],
         [
             "policia",
             "policia"
+        ],
+        [
+            "agent",
+            "agenta"
         ],
         [
             "príncep",
@@ -223,10 +239,6 @@
         [
             "portaveu",
             "portaveu"
-        ],
-        [
-            "portaveus",
-            "portaveus"
         ]
     ],
     "religion": [
@@ -241,14 +253,19 @@
             "musulmans"
         ],
         [
-            "Torà",
-            "Bíblia",
-            "Alcorà"
+            "torà",
+            "bíblia",
+            "alcorà"
         ],
         [
             "sinagoga",
             "església",
             "mesquita"
+        ],
+        [
+            "rabí",
+            "capellà",
+            "imam"
         ],
         [
             "rabí",
@@ -278,19 +295,19 @@
             "asiàtic"
         ],
         [
-            "Àfrica",
-            "Amèrica",
-            "Àsia"
+            "àfrica",
+            "amèrica",
+            "àsia"
         ],
         [
-            "Àfrica",
-            "Amèrica",
-            "Xina"
+            "àfrica",
+            "amèrica",
+            "xina"
         ],
         [
-            "Àfrica",
-            "Europa",
-            "Àsia"
+            "àfrica",
+            "europa",
+            "àsia"
         ]
     ]
 }
