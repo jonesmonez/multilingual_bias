@@ -5,6 +5,7 @@ import torch
 import transformers
 transformers.logging.set_verbosity_error()
 import numpy as np
+from pathlib import Path
 try:
     from tqdm.notebook import tqdm
 except ImportError:
@@ -12,6 +13,7 @@ except ImportError:
 from sklearn.decomposition import PCA
 
 from bias_bench.model import models
+from experiments.modules.experiment_name import filename
 
 class SubspaceCalculator:
     def __init__(
@@ -20,6 +22,7 @@ class SubspaceCalculator:
         model_name_or_path: str,
         batch_size: int,
         save_result: bool,
+        save_path: Path,
         verbose: bool,
     ):
         self.model_class = model_class
@@ -35,18 +38,21 @@ class SubspaceCalculator:
         self.model.to(self.device)
         
         self.save_result = save_result
+        self.save_path = save_path
         self.verbose = verbose
 
         if torch.cuda.device_count() > 1:
             print(f"Using {torch.cuda.device_count()} GPUs for encoding!")
             self.model = torch.nn.DataParallel(self.model)
+        elif torch.cuda.is_available():
+            print("Using GPU for encoding!")
             
     def setup_data(
         self,
         path_to_bias_attributes,
         lang_debias,
         path_to_dataset,
-        n_max_sent = 250000,
+        n_max_sent = None,
     ):
         self.lang_debias = lang_debias
         self.data = _GenericDataset(
@@ -127,6 +133,11 @@ class SubspaceCalculator:
         self.all_embeddings_male = np.concatenate(self.all_embeddings_male, axis=0)
         self.all_embeddings_female = np.concatenate(self.all_embeddings_female, axis=0)
 
+    def save_output(self, to_save_data, method, bias_type):
+        name = filename(method, bias_type, self.lang_debias, self.model_name_or_path) + ".pt"
+        self.save_path.mkdir(parents=True, exist_ok=True)
+        torch.save(to_save_data, self.save_path / name)
+
 class SentenceDebiasWrapper(SubspaceCalculator):
     def __init__(
         self,
@@ -134,6 +145,7 @@ class SentenceDebiasWrapper(SubspaceCalculator):
         model_name_or_path: str = "bert-base-multilingual-uncased",
         batch_size: int = 32,
         save_result: bool = False,
+        save_path: Path = Path("results/"),
         verbose: bool = False,
     ):
         super().__init__(
@@ -141,19 +153,15 @@ class SentenceDebiasWrapper(SubspaceCalculator):
             model_name_or_path,
             batch_size,
             save_result,
+            save_path,
             verbose,
         )
         
-    def compute_gender_subspace(self, save_path: str | None = None):
+    def compute_gender_subspace(self):
         """Returns race subspace components for SentenceDebias.
 
         Implementation based upon: https://github.com/pliang279/sent_debias.
         """
-        if self.save_result and save_path is None:
-            raise ValueError("'save_path' has to be defined if 'save_results' is True")
-        elif save_path is not None:
-            if save_path[-1] != "/":
-                save_path += "/"
                 
         super().compute_gender_subspace()
 
@@ -174,12 +182,11 @@ class SentenceDebiasWrapper(SubspaceCalculator):
         bias_direction = torch.tensor(pca.components_[0], dtype=torch.float32)
         
         if self.save_result:
-            os.makedirs(f"{save_path}results/", exist_ok=True)
-            torch.save(bias_direction, f"{save_path}results/gender_sentence_subspace_{self.lang_debias}.pt")
+            self.save_output(bias_direction, "sent", "gender")
 
         return bias_direction
 
-    def compute_racecolor_subspace(self, save_path: str | None = None):
+    def compute_racecolor_subspace(self):
         """Returns race subspace components for SentenceDebias.
 
         Implementation based upon: https://github.com/pliang279/sent_debias.
@@ -192,12 +199,6 @@ class SentenceDebiasWrapper(SubspaceCalculator):
         
         race_color_data = self.data.collect_counterfactual_sents("race-color")
         self.n_batches = (len(race_color_data) + self.batch_size - 1) // self.batch_size
-        
-        if self.save_result and save_path is None:
-            raise ValueError("'save_path' has to be defined if 'save_results' is True")
-        elif save_path is not None:
-            if save_path[-1] != "/":
-                save_path += "/"
                 
         all_embeddings_r1 = []
         all_embeddings_r2 = []
@@ -288,12 +289,11 @@ class SentenceDebiasWrapper(SubspaceCalculator):
         bias_direction = torch.tensor(pca.components_[0], dtype=torch.float32)
 
         if self.save_result:
-            os.makedirs(f"{save_path}results/", exist_ok=True)
-            torch.save(bias_direction, f"{save_path}results/racecolor_sentence_subspace_{self.lang_debias}.pt")
+            self.save_output(bias_direction, "sent", "race-color")
 
         return bias_direction
 
-    def compute_religion_subspace(self, save_path: str | None = None):
+    def compute_religion_subspace(self):
         """Returns religion subspace components for SentenceDebias.
 
         Implementation based upon: https://github.com/pliang279/sent_debias.
@@ -306,12 +306,6 @@ class SentenceDebiasWrapper(SubspaceCalculator):
         
         religion_data = self.data.collect_counterfactual_sents("religion")
         self.n_batches = (len(religion_data) + self.batch_size - 1) // self.batch_size
-        
-        if self.save_result and save_path is None:
-            raise ValueError("'save_path' has to be defined if 'save_results' is True")
-        elif save_path is not None:
-            if save_path[-1] != "/":
-                save_path += "/"
                 
         all_embeddings_r1 = []
         all_embeddings_r2 = []
@@ -404,8 +398,7 @@ class SentenceDebiasWrapper(SubspaceCalculator):
         bias_direction = torch.tensor(pca.components_[0], dtype=torch.float32)
 
         if self.save_result:
-            os.makedirs(f"{save_path}results/", exist_ok=True)
-            torch.save(bias_direction, f"{save_path}results/religion_sentence_subspace_{self.lang_debias}.pt")
+            self.save_output(bias_direction, "sent", "religion")
 
         return bias_direction
 
@@ -416,6 +409,7 @@ class DensrayDebiasWrapper(SubspaceCalculator):
         model_name_or_path: str = "bert-base-multilingual-uncased",
         batch_size: int = 32,
         save_result: bool = False,
+        save_path: Path = Path("results/"),
         verbose: bool = False,
     ):
         super().__init__(
@@ -423,15 +417,11 @@ class DensrayDebiasWrapper(SubspaceCalculator):
             model_name_or_path,
             batch_size,
             save_result,
+            save_path,
             verbose,
         )
 
-    def compute_gender_subspace(self, save_path: str | None = None):
-        if self.save_result and save_path is None:
-            raise ValueError("'save_path' has to be defined if 'save_results' is True")
-        elif save_path is not None:
-            if save_path[-1] != "/":
-                save_path += "/"
+    def compute_gender_subspace(self):
             
         super().compute_gender_subspace()
         
@@ -439,7 +429,7 @@ class DensrayDebiasWrapper(SubspaceCalculator):
             print("Warning: No embeddings found for DensRay gender subspace. Skipping.")
             return None
         
-        print('Computing the bias dimensions')
+        print("Computing the bias dimensions")
         densray = DensrayDebiasWrapper.DensRay(torch.from_numpy(self.all_embeddings_male),torch.from_numpy(self.all_embeddings_female))
         densray.fit()
         
@@ -450,8 +440,7 @@ class DensrayDebiasWrapper(SubspaceCalculator):
         }
 
         if self.save_result:
-            os.makedirs(f"{save_path}results", exist_ok=True)
-            torch.save(result, f"{save_path}results/gender_densray_subspace_{self.lang_debias}.pt")
+            self.save_output(result, "densray", "gender")
             
         return result
 
@@ -538,7 +527,7 @@ class DensrayDebiasWrapper(SubspaceCalculator):
             """Given A, this function computes the actual Transformation.
             It essentially just does an eigenvector decomposition.
             """
-            eigvals, eigvecs = torch.linalg.eigh(self.A, UPLO='U')
+            eigvals, eigvecs = torch.linalg.eigh(self.A, UPLO="U")
             # need to sort the eigenvalues
             idx = eigvals.argsort(descending=True)
             eigvals, self.eigvecs = eigvals[idx], eigvecs[:, idx]
@@ -674,7 +663,7 @@ class _SentenceDebiasDataset:
         self._lang_debias=lang_debias
         
     def load_attributes(self, bias_type):
-        with open(self._path_to_bias_attributes, "r") as f:
+        with open(self._path_to_bias_attributes, "r", encoding="UTF-8") as f:
             self._attribute_words = json.load(f)[self._bias_type]
         
     def load_examples(self):
@@ -691,7 +680,7 @@ class _GenericDataset(_SentenceDebiasDataset):
         self._path_corpus = path_to_text_corpus
         
     def load_examples(self, n_max_sent):
-        with open(self._path_corpus, "r") as f:
+        with open(self._path_corpus, "r", encoding="UTF-8") as f:
             lines = f.readlines()
 
         self.tokenized_data = []

@@ -1,11 +1,17 @@
 import os
 os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
+import json
 import torch
 import transformers
 transformers.logging.set_verbosity_error()
+import pandas as pd
+from pathlib import Path
 from functools import lru_cache
 from bias_bench.model import models
 from bias_bench.util import _is_generative, _is_self_debias
+
+from experiments.modules.experiment_name import filename
+from bias_bench.benchmark.crows import CrowSPairsRunner
 
 
 class CrowSPairsRunnerWrapper:
@@ -15,6 +21,9 @@ class CrowSPairsRunnerWrapper:
         model_class_base: str = "BertForMaskedLM",
         model_class_debias: str = "SentenceDebiasBertForMaskedLM",
         device: str | None = None,
+        save_result: bool = False,
+        save_path: Path = Path("results/"),
+        verbose: bool = False,
     ):  
         self.model_name_or_path = model_name_or_path
         self.model_class_base = model_class_base
@@ -25,6 +34,10 @@ class CrowSPairsRunnerWrapper:
         self.model_base = None
         
         self.tokenizer = transformers.AutoTokenizer.from_pretrained(model_name_or_path)
+        
+        self.save_result = save_result
+        self.save_path = save_path
+        self.verbose = verbose
 
     def _build_base_model(self):
         self.model_base = getattr(models, self.model_class_base)(self.model_name_or_path)
@@ -34,26 +47,35 @@ class CrowSPairsRunnerWrapper:
         
         self._is_generative = _is_generative(self.model_base)
         
+    def save_json_output(self, to_save_data, method, bias_type, lang_debias, lang_eval):
+        name = filename(method, bias_type, lang_debias, lang_eval, self.model_name_or_path) + ".json"
+        save_to = self.save_path / name
+        self.save_path.mkdir(parents=True, exist_ok=True)
+        with save_to.open(mode="w", encoding="UTF-8") as f:
+            json.dump(to_save_data, f)
+        if self.verbose:
+            print(f"Results saved to: \"{save_to.resolve()}\"")
+            
+    def csv_output_path(self, method, bias_type, lang_debias, lang_eval):
+        name = filename(method, bias_type, lang_debias, lang_eval, self.model_name_or_path) + ".csv"
+        save_to = self.save_path / name
+        self.save_path.mkdir(parents=True, exist_ok=True)
+        return save_to
+        
 
-    def run_plain(
+    def run_base(
         self,
         path_to_crows: str,
         lang_eval: str,
         bias_type: str,
         sample = False,
-        save_dir = ".",
-        save_result: bool = False,
-        verbose: bool = False,
     ):
-        from bias_bench.benchmark.crows import CrowSPairsRunner
-        from bias_bench.util import generate_experiment_id, _is_generative
-        
         if self.model_base is None:
             self._build_base_model()
         
-        if verbose:
+        if self.verbose:
             print("Running CrowS-Pairs benchmark:")
-            print(f" - save_dir: {save_dir}")
+            print(f" - save_path: {self.save_path}")
             print(f" - model_name_or_path: {self.model_name_or_path}")
             print(f" - bias_type: {bias_type}")
             print(f" - sample: {sample}")
@@ -66,29 +88,14 @@ class CrowSPairsRunnerWrapper:
             bias_type=bias_type,
             is_generative=_is_generative(self.model_base),
             sample=sample,
-            verbose=verbose,
+            verbose=self.verbose,
         )
         results, df_data_with_masks = runner()
 
-        if save_result:
-            experiment_id = generate_experiment_id(
-                name="automated_test",
-                model=self.model_class_base,
-                model_name_or_path=self.model_name_or_path,
-                bias_type=bias_type,
-                sample=sample,
-                lang_eval=lang_eval,
-            )
+        if self.save_result:
+            self.save_json_output(results, "crows-base", bias_type, None, lang_eval)
 
-            results_dir = f"{save_dir}/results/automated_crows_test"
-            os.makedirs(results_dir, exist_ok=True)
-            
-            with open(f"{results_dir}/{experiment_id}.json", "w") as f:
-                json.dump(results, f)
-
-            print(f"Results saved to: {results_dir}/{experiment_id}.json")
-
-        if verbose:
+        if self.verbose:
             print(f"Metric: {results}")
 
         return results, df_data_with_masks
@@ -132,14 +139,7 @@ class CrowSPairsRunnerWrapper:
         projection_matrix: str | None = None,
         load_path: str | None = None,
         sample: bool = False,
-        save_dir: str = ".",
-        save_result: bool = False,
-        verbose: bool = False,
     ):
-        import os
-        import json
-        import torch
-        from bias_bench.benchmark.crows import CrowSPairsRunner
         from bias_bench.util import (
             generate_experiment_id,
             _is_generative,
@@ -149,7 +149,7 @@ class CrowSPairsRunnerWrapper:
         if model_class is None:
             model_class = self.model_class_debias
         
-        if verbose:
+        if self.verbose:
             print("Running CrowS-Pairs benchmark:")
             print(f" - save_dir: {save_dir}")
             print(f" - model: {model_class}")
@@ -168,12 +168,10 @@ class CrowSPairsRunnerWrapper:
             bias_direction=bias_direction,
             projection_matrix=projection_matrix,
         )
-
-        tokenizer = self.tokenizer
         
         runner = CrowSPairsRunner(
             model=debias_model,
-            tokenizer=tokenizer,
+            tokenizer=self.tokenizer,
             input_file=path_to_crows,
             lang_eval=lang_eval,
             lang_debias=lang_debias,
@@ -181,10 +179,10 @@ class CrowSPairsRunnerWrapper:
             is_generative=_is_generative(debias_model),
             is_self_debias=_is_self_debias(debias_model),
             sample="true" if sample else "false",
-            verbose=verbose,
+            verbose=self.verbose,
         )
         results, df_data_with_masks = runner()
-        if save_result:
+        if self.save_result:
             experiment_id = generate_experiment_id(
                 name="automated_test",
                 model=debias_model.__class__.__name__,
@@ -194,25 +192,14 @@ class CrowSPairsRunnerWrapper:
                 lang_eval=lang_eval,
                 lang_debias=lang_debias,
             )
+            
+            self.save_json_output(results, "crows-debias", bias_type, lang_debias, lang_eval)
 
-            # Make sure the target directory exists
-            results_dir = os.path.join(save_dir, "results", "automated_crows_debias_test")
-            os.makedirs(results_dir, exist_ok=True)
+            df_data_with_masks.to_csv(self.csv_output_path(
+                "crows-debias", bias_type, lang_debias, lang_eval  
+            ), index=False)
 
-            csv_path = os.path.join(
-                results_dir,
-                f"{experiment_id}{'_debiased' if debias_model.__class__.__name__.startswith('Debias') else ''}.csv",
-            )
-            df_data_with_masks.to_csv(csv_path, index=False)
-
-            json_path = os.path.join(results_dir, f"{experiment_id}.json")
-            with open(json_path, "w") as f:
-                json.dump(results, f, indent=2)
-
-            if verbose:
-                print(f"Results saved to:\n  CSV: {csv_path}\n  JSON: {json_path}")
-
-        if verbose:
-            print(f"Metric: {results}")
+        if self.verbose:
+            print(f"Mejson_tric: {results}")
 
         return results, df_data_with_masks

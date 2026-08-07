@@ -5,6 +5,7 @@ import random
 import sklearn
 import transformers
 import numpy as np
+from pathlib import Path
 from sklearn.svm import LinearSVC
 try:
     from tqdm.notebook import tqdm
@@ -13,6 +14,8 @@ except ImportError:
 
 from bias_bench.model import models
 from bias_bench.debias.inlp import debias
+
+from experiments.modules.experiment_name  import filename
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -23,13 +26,13 @@ class InlpRunner:
         model_class: str,
         model_name_or_path: str,
         save_result: bool = False,
-        save_dir: str = "results/inlp/",
+        save_path: Path = Path("results/"),
         verbose: bool = False,
     ):
         self.model_class = model_class
         self.model_name_or_path = model_name_or_path
         self.save_result = save_result
-        self.save_dir = save_dir
+        self.save_path = save_path
         self.verbose = verbose
         
         self.model = getattr(models, self.model_class)(self.model_name_or_path)
@@ -64,9 +67,9 @@ class InlpRunner:
         return data
 
     def _load_gender_data(self):
-        with open(f"{self.path_to_bias_attributes}", "r") as f:
+        with open(f"{self.path_to_bias_attributes}", "r", encoding="UTF-8") as f:
             attribute_words = json.load(f)["gender"]
-        with open(f"{self.path_to_dataset}", "r") as f:
+        with open(f"{self.path_to_dataset}", "r", encoding="UTF-8") as f:
             lines = f.readlines()
         random.shuffle(lines)
 
@@ -173,9 +176,9 @@ class InlpRunner:
         return data
 
     def _load_race_data(self):
-        with open(f"{self.path_to_bias_attributes}", "r") as f:
+        with open(f"{self.path_to_bias_attributes}", "r", encoding="UTF-8") as f:
             attribute_words = json.load(f)["race"]
-        with open(f"{self.path_to_dataset}", "r") as f:
+        with open(f"{self.path_to_dataset}", "r", encoding="UTF-8") as f:
             lines = f.readlines()
         random.shuffle(lines)
 
@@ -243,9 +246,9 @@ class InlpRunner:
         return data
 
     def _load_religion_data(self):
-        with open(f"{self.path_to_bias_attributes}", "r") as f:
+        with open(f"{self.path_to_bias_attributes}", "r", encoding="UTF-8") as f:
             attribute_words = json.load(f)["religion"]
-        with open(f"{self.path_to_dataset}", "r") as f:
+        with open(f"{self.path_to_dataset}", "r", encoding="UTF-8") as f:
             lines = f.readlines()
         random.shuffle(lines)
 
@@ -522,11 +525,9 @@ class InlpRunner:
         P = torch.tensor(P, dtype=torch.float32)
 
         if self.save_result:
-            os.makedirs(f"{self.save_dir}", exist_ok=True)
-            torch.save(
-                projection_matrix,
-                f"{self.save_dir}projectionmatrix.pt",
-            )
+            name = filename("inlp", self.bias_type, self.lang_debias, self.model_name_or_path) + ".pt"
+            self.save_path.mkdir(parents=True, exists_ok=True)
+            torch.save(P, self.save_path / name)
             if self.verbose:
                 print(f"Saving to \"{self.save_dir}projectionmatrix.pt\"")
         
