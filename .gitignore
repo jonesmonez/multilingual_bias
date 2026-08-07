@@ -1,4 +1,6 @@
 __pycache__/
-data/text/
 results/
 .venv/
+*.bz2
+wiki_*
+*pct*
