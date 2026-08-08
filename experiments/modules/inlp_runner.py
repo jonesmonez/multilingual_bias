@@ -45,16 +45,19 @@ class InlpRunner:
         path_to_bias_attributes: str,
         lang_debias: str,
         bias_type: str,
+        seed: int = 0,
     ):
         self.path_to_dataset = path_to_dataset
         self.path_to_bias_attributes = path_to_bias_attributes
         self.lang_debias = lang_debias
         self.bias_type = bias_type
         
+        self.seed = seed
+        
         self.data = self._load_inlp_data()
 
-    def _load_inlp_data(self, seed=0):
-        random.seed(seed)
+    def _load_inlp_data(self):
+        random.seed(self.seed)
 
         if self.bias_type == "gender":
             data = self._load_gender_data()
@@ -177,7 +180,7 @@ class InlpRunner:
 
     def _load_race_data(self):
         with open(f"{self.path_to_bias_attributes}", "r", encoding="UTF-8") as f:
-            attribute_words = json.load(f)["race"]
+            attribute_words = json.load(f)["race-color"]
         with open(f"{self.path_to_dataset}", "r", encoding="UTF-8") as f:
             lines = f.readlines()
         random.shuffle(lines)
@@ -419,7 +422,7 @@ class InlpRunner:
         return bias_features, neutral_features
 
     def _split_gender_dataset(self, male_feat, female_feat, neut_feat):
-        np.random.seed(0)
+        np.random.seed(self.seed)
 
         X = np.concatenate((male_feat, female_feat, neut_feat), axis=0)
 
@@ -439,7 +442,7 @@ class InlpRunner:
         return X_train, X_dev, X_test, Y_train, Y_dev, Y_test
 
     def _split_binary_dataset(self, bias_feat, neut_feat):
-        np.random.seed(0)
+        np.random.seed(self.seed)
 
         X = np.concatenate((bias_feat, neut_feat), axis=0)
 
@@ -526,7 +529,7 @@ class InlpRunner:
 
         if self.save_result:
             name = filename("inlp", self.bias_type, self.lang_debias, self.model_name_or_path) + ".pt"
-            self.save_path.mkdir(parents=True, exists_ok=True)
+            self.save_path.mkdir(parents=True, exist_ok=True)
             torch.save(P, self.save_path / name)
             if self.verbose:
                 print(f"Saving to \"{self.save_dir}projectionmatrix.pt\"")
