@@ -46,7 +46,7 @@ def _create_bias_attribute_words(attribute_file, bias_type):
           The current set of words is *not* exhaustive, however, it should
           cover most occurances.
     """
-    with open(attribute_file, "r") as f:
+    with open(attribute_file, "r", encoding="utf-8") as f:
         bias_attribute_words = json.load(f)[bias_type]
 
     result = bias_attribute_words[:]
@@ -253,6 +253,9 @@ class CDADataset(Dataset):
         # Apply max_train_samples after building examples
         if self.max_train_samples is not None:
             self.examples = self.examples[: self.max_train_samples]
+        
+        del self.raw_lines    
+        
 
     def __len__(self) -> int:
         return len(self.examples)
@@ -267,7 +270,7 @@ class BaseDebiasTrainer:
         model_name_or_path: str,
         *,
         max_seq_length: int = 128,
-        seed: int = 42,
+        seed: int = 0,
         fp16: bool = False,
         dataloader_num_workers: int = 2,
         max_train_samples: Optional[int] = None,
@@ -381,7 +384,7 @@ class CDATrainer(BaseDebiasTrainer):
         bias_attribute_json: Union[str, os.PathLike],
         *,
         max_seq_length: int = 128,
-        seed: int = 42,
+        seed: int = 0,
         fp16: bool = False,
         dataloader_num_workers: int = 2,
     ):
