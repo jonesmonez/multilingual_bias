@@ -11,7 +11,8 @@ from bias_bench.model import models
 from bias_bench.util import _is_generative, _is_self_debias
 
 from experiments.modules.experiment_name import filename
-from bias_bench.benchmark.crows import CrowSPairsRunner
+from bias_bench.benchmark.crows.crows import CrowSPairsRunner
+from bias_bench.benchmark.crows.crows_batched import CrowSPairsBatchedRunner
 
 
 class CrowSPairsRunnerWrapper:
@@ -24,7 +25,10 @@ class CrowSPairsRunnerWrapper:
         save_result: bool = False,
         save_path: Path = Path("results/"),
         verbose: bool = False,
+        batched: bool = False,
     ):  
+        self.batched = batched
+        
         self.model_name_or_path = model_name_or_path
         self.model_class_base = model_class_base
         self.model_class_debias = model_class_debias
@@ -61,7 +65,12 @@ class CrowSPairsRunnerWrapper:
         save_to = self.save_path / name
         self.save_path.mkdir(parents=True, exist_ok=True)
         return save_to
-        
+    
+    @staticmethod
+    def create_runner(batched: bool, **kwargs):
+        if batched:
+            return CrowSPairsBatchedRunner(**kwargs)
+        return CrowSPairsRunner(**kwargs)
 
     def run_base(
         self,
@@ -80,7 +89,8 @@ class CrowSPairsRunnerWrapper:
             print(f" - bias_type: {bias_type}")
             print(f" - sample: {sample}")
 
-        runner = CrowSPairsRunner(
+        runner = self.create_runner(
+            batched=self.batched,
             model=self.model_base,
             tokenizer=self.tokenizer,
             input_file=path_to_crows,
@@ -133,11 +143,12 @@ class CrowSPairsRunnerWrapper:
         path_to_crows: str,
         lang_debias: str,
         lang_eval: str,
-        bias_type: str,
+        bias_type: str | list,
         model_class: str | None = None,
         bias_direction: str | None = None,
         projection_matrix: str | None = None,
         load_path: str | None = None,
+        debias_model: torch.nn.Module | None = None,
         sample: bool = False,
     ):
         from bias_bench.util import (
@@ -162,14 +173,22 @@ class CrowSPairsRunnerWrapper:
             print(f" - lang_eval: {lang_eval}")
             print(f" - lang_debias: {lang_debias}")
 
-        debias_model = self._build_debias_model(
-            model_class_str=model_class,
-            load_path=load_path,
-            bias_direction=bias_direction,
-            projection_matrix=projection_matrix,
-        )
+        if debias_model is None:
+            debias_model = self._build_debias_model(
+                model_class_str=model_class,
+                load_path=load_path,
+                bias_direction=bias_direction,
+                projection_matrix=projection_matrix,
+            )
         
-        runner = CrowSPairsRunner(
+        if hasattr(debias_model, 'to'):
+            debias_model = debias_model.to(self.device)
+        
+        if hasattr(debias_model, 'eval'):
+            debias_model.eval()
+        
+        runner = self.create_runner(
+            batched=self.batched,
             model=debias_model,
             tokenizer=self.tokenizer,
             input_file=path_to_crows,

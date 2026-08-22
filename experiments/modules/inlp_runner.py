@@ -528,7 +528,7 @@ class InlpRunner:
         P = torch.tensor(P, dtype=torch.float32)
 
         if self.save_result:
-            name = filename("inlp", self.bias_type, self.lang_debias, self.model_name_or_path) + ".pt"
+            name = filename("inlp", self.bias_type, self.lang_debias) + ".pt"
             self.save_path.mkdir(parents=True, exist_ok=True)
             torch.save(P, self.save_path / name)
             if self.verbose:

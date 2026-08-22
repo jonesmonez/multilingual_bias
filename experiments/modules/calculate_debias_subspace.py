@@ -134,7 +134,7 @@ class SubspaceCalculator:
         self.all_embeddings_female = np.concatenate(self.all_embeddings_female, axis=0)
 
     def save_output(self, to_save_data, method, bias_type):
-        name = filename(method, bias_type, self.lang_debias, self.model_name_or_path) + ".pt"
+        name = filename(method, bias_type, self.lang_debias) + ".pt"
         self.save_path.mkdir(parents=True, exist_ok=True)
         torch.save(to_save_data, self.save_path / name)
 

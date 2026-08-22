@@ -54,7 +54,7 @@ class _DensrayModel:
             #print(x.size())
             
             # Ensure that everything is on the same device.
-            bias_direction = bias_direction.to(x.device)
+            bias_direction = bias_direction["eigenvecs"].to(x.device)
             #print(bias_direction.size())
             #Debias the representations
             for t in range(x.size(1)):

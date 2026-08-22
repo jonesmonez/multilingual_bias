@@ -63,7 +63,10 @@ class CrowSPairsRunner:
         self._is_generative = is_generative
         self._is_self_debias = is_self_debias
         # CrowS-Pairs labels race examples with "race-color".
-        self._bias_type = bias_type
+        if isinstance(bias_type, str):
+            self._bias_type = [bias_type]
+        else:
+            self._bias_type = bias_type
         self.sample=sample
         self.seed=seed
         self.verbose=verbose
@@ -91,8 +94,6 @@ class CrowSPairsRunner:
             self._model._model.to(device)
         else:
             self._model.to(device)
-        
-        df_data = self._read_data(self._input_file)
 
         total_stereo, total_antistereo = 0, 0
         stereo_score, antistereo_score = 0, 0
@@ -103,15 +104,12 @@ class CrowSPairsRunner:
         skipped = []
         rows = []
         with tqdm(total=total, leave=False) as pbar:
-            df_loop = df_data.loc[df_data['bias_type']==self._bias_type]
             if self.sample=="true":
-                df_loop = df_loop.sample(n=40,random_state=self.seed)
+                df_data = df_data.sample(n=40,random_state=self.seed)
             
-            for index, data in df_loop.iterrows():
+            for index, data in df_data.iterrows():
                 direction = data["direction"]
                 bias = data["bias_type"]
-
-                assert bias == self._bias_type
 
                 sent1, sent2, sentId = data["sent1"], data["sent2"], data["id"]
 
@@ -462,8 +460,7 @@ class CrowSPairsRunner:
         )
 
         if self._bias_type is not None:
-            bias_key = "race-color" if self._bias_type == "race" else self._bias_type
-            df = df[df["bias_type"] == bias_key]
+            df = df[df["bias_type"].isin(self._bias_type)]
 
         df = df.rename(
             columns={

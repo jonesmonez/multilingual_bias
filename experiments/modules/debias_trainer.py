@@ -18,9 +18,12 @@ from transformers import (
     AutoTokenizer,
     AutoConfig,
     AutoModelForMaskedLM,
-    Trainer,
-    TrainingArguments,
     DataCollatorForLanguageModeling,
+    Trainer,
+    TrainerCallback,
+    TrainingArguments,
+    TrainerState,
+    TrainerControl,
 )
 
 
@@ -32,14 +35,13 @@ def load_bias_attributes(json_path: Union[str, os.PathLike], bias_type: str):
                        f"Available keys: {list(data.keys())}")
     return data[bias_type]
 
-
 def _create_bias_attribute_words(attribute_file, bias_type):
     """Creates list of bias attribute words (e.g., he/she) with punctuation variants.
 
     Args:
         attribute_file: Path to the file containing the bias attribute words.
         bias_type: Type of bias attribute words to load. Must be one of
-            ["gender", "race", "religion"].
+            ["gender", "race-color", "religion"].
 
     Notes:
         * We combine each bias attribute word with several punctuation marks.
@@ -55,7 +57,6 @@ def _create_bias_attribute_words(attribute_file, bias_type):
             augmented_words = [word + punctuation for word in words]
             result.append(augmented_words)
     return result
-
 
 def gender_counterfactual_augmentation(examples, bias_attribute_words, tokenizer, max_seq_length):
     """Applies gender counterfactual data augmentation to a batch of examples.
@@ -101,7 +102,6 @@ def gender_counterfactual_augmentation(examples, bias_attribute_words, tokenizer
         truncation=True,
         max_length=max_seq_length,
     )
-
 
 def ternary_counterfactual_augmentation(examples, bias_attribute_words, tokenizer, max_seq_length):
     """Applies racial/religious counterfactual data augmentation to a batch of
@@ -166,7 +166,6 @@ def ternary_counterfactual_augmentation(examples, bias_attribute_words, tokenize
         truncation=True,
         max_length=max_seq_length,
     )
-
 
 class CDADataset(Dataset):
     def __init__(
@@ -263,7 +262,6 @@ class CDADataset(Dataset):
     def __getitem__(self, idx: int) -> Dict[str, Any]:
         return self.examples[idx]
 
-
 class BaseDebiasTrainer:
     def __init__(
         self,
@@ -304,25 +302,41 @@ class BaseDebiasTrainer:
                 config.attention_probs_dropout_prob = 0.05
         return config
 
-
 class DropoutTrainer(BaseDebiasTrainer):
+    def __init__(
+        self,
+        model_name_or_path: str,
+        *,
+        max_seq_length: int = 128,
+        seed: int = 0,
+        fp16: bool = False,
+        dataloader_num_workers: int = 2,
+        evaluator_func: Optional[callable] = None,
+    ):
+        super().__init__(
+            model_name_or_path,
+            max_seq_length=max_seq_length,
+            seed=seed,
+            fp16=fp16,
+            dataloader_num_workers=dataloader_num_workers,
+        )
+        self.evaluator_func = evaluator_func
+        
     def train(
         self,
         *,
         train_file: Union[str, os.PathLike],
-        output_dir: Union[str, os.PathLike],
+        output_dir: Union[str, os.PathLike] = Path("results/dropout/"),
         num_train_epochs: int = 3,
         per_device_train_batch_size: int = 16,
         learning_rate: float = 5e-5,
         logging_steps: int = 500,
-        save_steps: Optional[int] = None,
+        save_steps: Optional[int] = 500,
         overwrite_output_dir: bool = False,
         max_train_samples: Optional[int] = None,
+        early_stopping_patience: int = 2,
         **trainer_kwargs: Any,
     ) -> str:
-        output_dir = Path(output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
-
         tokenizer = self._get_tokenizer()
         config = self._get_model_config(dropout_debias=True)
 
@@ -349,6 +363,20 @@ class DropoutTrainer(BaseDebiasTrainer):
         if overwrite_output_dir and os.path.exists(output_dir):
             shutil.rmtree(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
+        
+        callbacks = []
+        if self.evaluator_func is not None:
+            eval_callback = BiasEarlyStoppingCallback(
+                evaluator_func=self.evaluator_func,
+                bias_type=["gender", "race-color", "religion"],
+                target_score=50.0,
+                min_threshold=48.0,
+                patience=early_stopping_patience,
+            )
+            callbacks.append(eval_callback)
+            evaluation_strategy = "steps"
+        else:
+            evaluation_strategy = "no"
 
         args = TrainingArguments(
             output_dir=str(output_dir),
@@ -356,12 +384,16 @@ class DropoutTrainer(BaseDebiasTrainer):
             per_device_train_batch_size=per_device_train_batch_size,
             learning_rate=learning_rate,
             logging_steps=logging_steps,
+            eval_steps=1000,
             save_steps=save_steps,
             seed=self.seed,
             fp16=self.fp16,
             dataloader_num_workers=self.dataloader_num_workers,
             report_to="none",
             disable_tqdm=False,
+            eval_strategy="no",
+            save_strategy="steps",
+            load_best_model_at_end=False,
             **trainer_kwargs,
         )
 
@@ -370,12 +402,12 @@ class DropoutTrainer(BaseDebiasTrainer):
             args=args,
             data_collator=data_collator,
             train_dataset=train_dataset,
+            callbacks=callbacks,
         )
 
         trainer.train()
         trainer.save_model()
         return str(output_dir)
-
 
 class CDATrainer(BaseDebiasTrainer):
     def __init__(
@@ -387,6 +419,7 @@ class CDATrainer(BaseDebiasTrainer):
         seed: int = 0,
         fp16: bool = False,
         dataloader_num_workers: int = 2,
+        evaluator_func: Optional[callable] = None,
     ):
         super().__init__(
             model_name_or_path,
@@ -400,25 +433,24 @@ class CDATrainer(BaseDebiasTrainer):
             raise FileNotFoundError(
                 f"Bias attribute file not found: {self.bias_attribute_json}"
             )
+        self.evaluator_func = evaluator_func
 
     def train(
         self,
         *,
         train_file: Union[str, os.PathLike],
-        output_dir: Union[str, os.PathLike],
-        bias_type: Literal["gender", "race", "religion"],
+        output_dir: Union[str, os.PathLike] = Path("results/cda/"),
+        bias_type: Literal["gender", "race-color", "religion"],
         num_train_epochs: int = 3,
         per_device_train_batch_size: int = 16,
         learning_rate: float = 5e-5,
         logging_steps: int = 500,
-        save_steps: Optional[int] = None,
+        save_steps: Optional[int] = 500,
         overwrite_output_dir: bool = False,
         max_train_samples: Optional[int] = None,
+        early_stopping_patience: int = 2,
         **trainer_kwargs: Any,
     ) -> str:
-        output_dir = Path(output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
-
         tokenizer = self._get_tokenizer()
         config = self._get_model_config(dropout_debias=False)
 
@@ -445,6 +477,20 @@ class CDATrainer(BaseDebiasTrainer):
         if overwrite_output_dir and os.path.exists(output_dir):
             shutil.rmtree(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
+        
+        callbacks = []
+        if self.evaluator_func is not None:
+            eval_callback = BiasEarlyStoppingCallback(
+                evaluator_func=self.evaluator_func,
+                bias_type=bias_type,
+                target_score=50.0,
+                min_threshold=48.0,
+                patience=early_stopping_patience,
+            )
+            callbacks.append(eval_callback)
+            evaluation_strategy = "steps"
+        else:
+            evaluation_strategy = "no"
 
         args = TrainingArguments(
             output_dir=str(output_dir),
@@ -452,12 +498,16 @@ class CDATrainer(BaseDebiasTrainer):
             per_device_train_batch_size=per_device_train_batch_size,
             learning_rate=learning_rate,
             logging_steps=logging_steps,
+            eval_steps=1000,
             save_steps=save_steps,
             seed=self.seed,
             fp16=self.fp16,
             dataloader_num_workers=self.dataloader_num_workers,
             report_to="none",
             disable_tqdm=False,
+            eval_strategy="no",
+            save_strategy="steps",
+            load_best_model_at_end=False,
             **trainer_kwargs,
         )
 
@@ -466,8 +516,111 @@ class CDATrainer(BaseDebiasTrainer):
             args=args,
             data_collator=data_collator,
             train_dataset=train_dataset,
+            callbacks=callbacks,
         )
 
         trainer.train()
         trainer.save_model()
         return str(output_dir)
+    
+class BiasEarlyStoppingCallback(TrainerCallback):
+    def __init__(
+        self,
+        evaluator_func,
+        bias_type,
+        target_score=50.0,
+        min_threshold=48.0,
+        patience=2,
+    ):
+        self.evaluator = evaluator_func
+        self.bias_type = bias_type
+        self.target = target_score
+        self.min_threshold = min_threshold
+        self.patience = patience
+        self.best_score = None
+        self.wait = 0
+        self.last_evaluation_step = 0
+        self.steps_since_last_eval = 0
+        
+    def on_step_end(
+        self,
+        args: TrainingArguments,
+        state: TrainerState,
+        control: TrainerControl,
+        **kwargs,
+    ):
+        if state.global_step % args.eval_steps != 0:
+            return
+        
+        current_model = kwargs.get("model")
+        if current_model is None:
+            return
+        
+        was_training = current_model.training
+        current_model.eval()
+    
+        try:
+            with torch.no_grad():
+                score = self.evaluator(current_model, self.bias_type)
+        except Exception as e:
+            print(f"Error while evaluating: {e}")
+            return
+        finally:
+            if was_training:
+                current_model.train()
+        
+        print(f"Step {state.global_step}: BiasScore = {score:.2f}%")
+        
+        if score < self.min_threshold:
+            print(f"Overcompensation! Score below {self.min_threshold}%, stopping training...")
+            control.should_training_stop = True
+            return
+        
+        distance = abs(score - self.target)
+        
+        if self.best_score is None or distance < self.best_score["distance"]:
+            self.best_score = {"epoch": state.epoch, "score": score, "distance": distance}
+            self.wait = 0
+        else:
+            self.wait += 1
+            if self.wait >= self.patience:
+                print(f"Patience limit reached ({self.wait}), stopping training...")
+                control.should_training_stop = True
+                return
+            
+        self.last_evaluation_step = state.global_step
+        
+        if self.best_score is None or distance < self.best_score["distance"]:
+            self.best_score = {
+                "epoch": state.epoch,
+                "step": state.global_step,
+                "score": score,
+                "distance": distance,
+            }
+            
+            best_model_dir = os.path.join(args.output_dir, "best_model")
+            
+            if os.path.exists(best_model_dir):
+                shutil.rmtree(best_model_dir)
+                
+            os.makedirs(best_model_dir, exist_ok=True)
+            
+            current_model.save_pretrained(best_model_dir)
+            
+            if hasattr(self, "tokenizer") and self.tokenizer is not None:
+                self.tokenizer.save_pretrained(best_model_dir)
+                
+            self.wait = 0
+            
+            print(f"New best model: step={state.global_step}, score={score:.2f}%")
+                
+    def on_train_end(
+        self,
+        args: TrainingArguments,
+        state: TrainerState,
+        control: TrainerControl,
+        **kwargs
+    ):
+        if self.best_score:
+            print(f"Best result: Step {self.best_score['step']} with Score {self.best_score['score']:.2f}%")
+            print(f"Best model: {os.path.join(args.output_dir, 'best_model')}")

@@ -26,7 +26,7 @@ DEBIASING_PREFIXES = {
 }
 
 
-class CrowSPairsRunner:
+class CrowSPairsBatchedRunner:
     """Runs the CrowS-Pairs benchmark.
 
     Notes:
@@ -64,7 +64,10 @@ class CrowSPairsRunner:
         self._is_generative = is_generative
         self._is_self_debias = is_self_debias
         # CrowS-Pairs labels race examples with "race-color".
-        self._bias_type = bias_type
+        if isinstance(bias_type, str):
+            self._bias_type = [bias_type]
+        else:
+            self._bias_type = bias_type
         self.sample = sample
         self.seed = seed
         self.verbose = verbose
@@ -102,14 +105,12 @@ class CrowSPairsRunner:
         skipped = []
         rows = []
 
-        # Filter by bias type and optionally sample
-        df_loop = df_data.loc[df_data['bias_type'] == self._bias_type]
         if self.sample == "true":
-            df_loop = df_loop.sample(n=40, random_state=self.seed)
+            df_data = df_data.sample(n=40, random_state=self.seed)
 
         # Process in batches with tqdm progress bar
         batch_size = self.batch_size
-        num_batches = (len(df_loop) + batch_size - 1) // batch_size
+        num_batches = (len(df_data) + batch_size - 1) // batch_size
 
         pbar = tqdm(total=num_batches, desc="Processing examples", leave=False)
         if self._bias_type is not None:
@@ -118,14 +119,14 @@ class CrowSPairsRunner:
                 description += f"{self.lang_eval} "
             if self.lang_debias is not None:
                 description += f"(debiased with {self.lang_debias}) "
-            description += f"{self._bias_type} examples"
+            description += f"{self._bias_type[0] if isinstance(self._bias_type, list) and len(self._bias_type) > 0 else self._bias_type} examples"
             pbar.set_description(description)
 
         try:
             for batch_idx in range(num_batches):
                 start = batch_idx * batch_size
-                end = min(start + batch_size, len(df_loop))
-                batch_df = df_loop.iloc[start:end]
+                end = min(start + batch_size, len(df_data))
+                batch_df = df_data.iloc[start:end]
 
                 # Prepare lists for the batch
                 sent1_list = batch_df["sent1"].tolist()
@@ -214,47 +215,47 @@ class CrowSPairsRunner:
     ):
         """Process a batch of sentence pairs and return scores and metrics."""
         batch_size = len(sent1_list)
-        masked_sentences = []
-        mapping = []
-        original_token_ids_sent1 = []
-        original_token_ids_sent2 = []
-        spans_sent1_per_pair = []
-        spans_sent2_per_pair = []
+
+        # Pre-tokenize all sentences
+        token_ids_sent1 = [self._tokenizer.encode(sent, return_tensors="pt")[0] for sent in sent1_list]
+        token_ids_sent2 = [self._tokenizer.encode(sent, return_tensors="pt")[0] for sent in sent2_list]
+
+        # Collect all masking tasks: (pair_idx, sent_idx, pos, masked_token_ids)
+        masking_tasks = []  # List of (pair_idx, sent_idx, pos, masked_token_ids)
+        spans_info = []     # List of (pair_idx, sent1_spans, sent2_spans) for later use
 
         for pair_idx in range(batch_size):
-            sent1 = sent1_list[pair_idx]
-            sent2 = sent2_list[pair_idx]
+            sent1_ids = token_ids_sent1[pair_idx]
+            sent2_ids = token_ids_sent2[pair_idx]
             bias = bias_list[pair_idx]
             direction = direction_list[pair_idx]
             sentId = sentId_list[pair_idx]
-
-            # Tokenize
-            sent1_token_ids = self._tokenizer.encode(sent1, return_tensors="pt")[0]  # 1D tensor
-            sent2_token_ids = self._tokenizer.encode(sent2, return_tensors="pt")[0]
-
-            original_token_ids_sent1.append(sent1_token_ids)
-            original_token_ids_sent2.append(sent2_token_ids)
+            original_idx = index_list[pair_idx]
 
             # Get spans of non-changing tokens (positions to mask)
-            template1, template2 = _get_span(
-                sent1_token_ids, sent2_token_ids, "diff"
-            )
-            spans_sent1_per_pair.append(template1)
-            spans_sent2_per_pair.append(template2)
+            template1, template2 = _get_span(sent1_ids, sent2_ids, "diff")
 
+            # Skip this pair if either template is empty (matches original behavior)
+            if not template1 or not template2:
+                spans_info.append((pair_idx, template1, template2))  # Still store for indexing
+                # Don't create masking tasks for this pair - it will be skipped later
+                continue
+
+            spans_info.append((pair_idx, template1, template2))
+
+            # Create masked versions for sent1
             for pos in template1:
-                masked_ids = sent1_token_ids.clone()
+                masked_ids = sent1_ids.clone()
                 masked_ids[pos] = self._tokenizer.mask_token_id
-                masked_sentences.append(self._tokenizer.decode(masked_ids, skip_special_tokens=False))
-                mapping.append((pair_idx, 0, pos))  # 0 for sent1
+                masking_tasks.append((pair_idx, 0, pos, masked_ids))  # 0 for sent1
 
+            # Create masked versions for sent2
             for pos in template2:
-                masked_ids = sent2_token_ids.clone()
+                masked_ids = sent2_ids.clone()
                 masked_ids[pos] = self._tokenizer.mask_token_id
-                masked_sentences.append(self._tokenizer.decode(masked_ids, skip_special_tokens=False))
-                mapping.append((pair_idx, 1, pos))  # 1 for sent2
+                masking_tasks.append((pair_idx, 1, pos, masked_ids))  # 1 for sent2
 
-        if not masked_sentences:
+        if not masking_tasks:
             # Return zeros for this batch
             batch_score1 = [0.0] * batch_size
             batch_score2 = [0.0] * batch_size
@@ -269,68 +270,102 @@ class CrowSPairsRunner:
                     batch_stereo_score, batch_antistereo_score,
                     batch_neutral, batch_N)
 
-        # Tokenize all masked sentences with padding
-        masked_encodings = self._tokenizer(
-            masked_sentences,
-            padding=True,
-            return_tensors="pt",
+        # Find max length for padding
+        max_len = max(
+            max((tensors.size(0) for _, _, _, tensors in masking_tasks), default=0),
+            max((tensors.size(0) for tensors in token_ids_sent1), default=0),
+            max((tensors.size(0) for tensors in token_ids_sent2), default=0)
         )
-        input_ids = masked_encodings["input_ids"].to(device)
-        attention_mask = masked_encodings["attention_mask"].to(device)
+
+        # Pad all masked token ID tensors to max_len
+        padded_masked_ids = []
+        attention_masks = []
+        original_lengths = []  # To know where actual tokens end vs padding begins
+
+        for pair_idx, sent_idx, pos, masked_ids in masking_tasks:
+            seq_len = masked_ids.size(0)
+            if seq_len < max_len:
+                # Pad with pad_token_id (typically 0 or 1, but let's use tokenizer's pad token)
+                pad_token_id = self._tokenizer.pad_token_id
+                if pad_token_id is None:
+                    pad_token_id = 0  # fallback
+                padding = torch.full((max_len - seq_len,), pad_token_id, dtype=masked_ids.dtype, device=masked_ids.device)
+                padded_ids = torch.cat([masked_ids, padding], dim=0)
+            else:
+                padded_ids = masked_ids
+
+            # Create attention mask: 1 for real tokens, 0 for padding
+            attn_mask = torch.zeros(max_len, dtype=torch.long, device=masked_ids.device)
+            attn_mask[:seq_len] = 1
+
+            padded_masked_ids.append(padded_ids)
+            attention_masks.append(attn_mask)
+            original_lengths.append(seq_len)
+
+        # Stack into batches
+        batch_input_ids = torch.stack(padded_masked_ids).to(device)  # [num_masking_tasks, max_len]
+        batch_attention_mask = torch.stack(attention_masks).to(device)  # [num_masking_tasks, max_len]
 
         # Model forward pass (batched)
         with torch.no_grad():
             if self._is_self_debias:
-                debiasing_prefixes = [DEBIASING_PREFIXES[self._bias_type]]
+                # Handle both string and list bias_type
+                bias_type_key = self._bias_type[0] if isinstance(self._bias_type, list) else self._bias_type
+                debiasing_prefixes = [DEBIASING_PREFIXES[bias_type_key]]
                 hidden_states_batch = self._model.get_token_logits_self_debiasing(
-                    input_ids,
+                    batch_input_ids,
                     debiasing_prefixes=debiasing_prefixes,
                     decay_constant=50,
                     epsilon=0.01,
                 )
-                logits_batch = hidden_states_batch  # Assuming returns logits
+                # Assuming the method returns logits ready for softmax
+                logits_batch = hidden_states_batch
             else:
-                outputs = self._model(input_ids, attention_mask=attention_mask)
-                logits_batch = outputs.logits  # [batch_size, seq_len, vocab_size]
+                outputs = self._model(batch_input_ids, attention_mask=batch_attention_mask)
+                logits_batch = outputs.logits  # [num_masking_tasks, max_len, vocab_size]
 
-        mask_token_id = self._tokenizer.mask_token_id
-        masked_positions = torch.nonzero(input_ids == mask_token_id, as_tuple=False)
-        masked_seq_indices = masked_positions[:, 1]  # [num_masked]
+        # For each masking task, get the logits at the specific masked position
+        # We need to gather: for task i, get logits at position pos_i
+        task_indices = torch.arange(len(masking_tasks), device=device)
+        target_positions = torch.tensor([pos for (_, _, pos, _) in masking_tasks], device=device)
 
-        batch_indices = torch.arange(input_ids.size(0), device=device)  # [num_masked]
-        selected_logits = logits_batch[batch_indices, masked_seq_indices, :]  # [num_masked, vocab_size]
+        # Gather logits at the masked positions: [num_masking_tasks, vocab_size]
+        selected_logits = logits_batch[task_indices, target_positions, :]
 
         # Compute log probabilities
-        log_probs = F.log_softmax(selected_logits, dim=-1)  # [num_masked, vocab_size]
+        log_probs = F.log_softmax(selected_logits, dim=-1)  # [num_masking_tasks, vocab_size]
 
         # Get target token ids (the original token that was masked)
         target_ids = []
-        for (pair_idx, sent_idx, pos) in mapping:
+        for pair_idx, sent_idx, pos, _ in masking_tasks:
             if sent_idx == 0:
-                orig_ids = original_token_ids_sent1[pair_idx]
+                orig_ids = token_ids_sent1[pair_idx]
             else:
-                orig_ids = original_token_ids_sent2[pair_idx]
+                orig_ids = token_ids_sent2[pair_idx]
             target_id = orig_ids[pos].item()
             target_ids.append(target_id)
-        target_ids = torch.tensor(target_ids, device=device)  # [num_masked]
+        target_ids = torch.tensor(target_ids, device=device)  # [num_masking_tasks]
 
-        batch_log_probs = log_probs[torch.arange(len(target_ids), device=device), target_ids]  # [num_masked]
-        # Convert to list
+        # Extract log prob of the correct token for each masking task
+        batch_log_probs = log_probs[torch.arange(len(target_ids), device=device), target_ids]  # [num_masking_tasks]
         log_probs_list = batch_log_probs.cpu().tolist()
 
-        probs = F.softmax(selected_logits, dim=-1)  # [num_masked, vocab_size]
+        # Get top-k predictions
+        probs = F.softmax(selected_logits, dim=-1)  # [num_masking_tasks, vocab_size]
         topk = torch.topk(probs, 5, dim=-1)
-        top_k_weights = topk.values  # [num_masked, 5]
-        top_k_indices = topk.indices  # [num_masked, 5]
+        top_k_weights = topk.values  # [num_masking_tasks, 5]
+        top_k_indices = topk.indices  # [num_masking_tasks, 5]
 
+        # Initialize accumulators
         sum_log_probs_sent1 = [0.0] * batch_size
         count_sent1 = [0] * batch_size
-        list_prob_mask1 = [[] for _ in range(batch_size)]  # list of list of top-k dicts per span
+        list_prob_mask1 = [[] for _ in range(batch_size)]
         sum_log_probs_sent2 = [0.0] * batch_size
         count_sent2 = [0] * batch_size
         list_prob_mask2 = [[] for _ in range(batch_size)]
 
-        for i, (pair_idx, sent_idx, pos) in enumerate(mapping):
+        # Process results and accumulate by sentence pair
+        for i, (pair_idx, sent_idx, pos, _) in enumerate(masking_tasks):
             log_prob = log_probs_list[i]
             # Get top-k for this masked span
             weights = top_k_weights[i].cpu().tolist()
@@ -377,6 +412,7 @@ class CrowSPairsRunner:
             bias = bias_list[pair_idx]
             sentId = sentId_list[pair_idx]
             original_idx = index_list[pair_idx]
+            template1, template2 = spans_info[pair_idx][1], spans_info[pair_idx][2]
 
             s1 = score1[pair_idx]
             s2 = score2[pair_idx]
@@ -393,7 +429,7 @@ class CrowSPairsRunner:
 
             batch_N += 1
             pair_score = 0
-            if s1 == s2:
+            if score1_r == score2_r:
                 batch_neutral += 1
             else:
                 if direction == "stereo":
@@ -551,7 +587,9 @@ class CrowSPairsRunner:
 
         with torch.no_grad():
             if self._is_self_debias:
-                debiasing_prefixes = [DEBIASING_PREFIXES[self._bias_type]]
+                # Handle both string and list bias_type
+                bias_type_key = self._bias_type[0] if isinstance(self._bias_type, list) else self._bias_type
+                debiasing_prefixes = [DEBIASING_PREFIXES[bias_type_key]]
                 (logits, input_ids,) = self._model.compute_loss_self_debiasing(
                     tokens_tensor, debiasing_prefixes=debiasing_prefixes
                 )
@@ -564,12 +602,12 @@ class CrowSPairsRunner:
 
                 # Get the first token prob.
                 probs = torch.softmax(
-                    logits[1, bias_type_to_position[self._bias_type] - 1], dim=-1
+                    logits[1, bias_type_to_position[bias_type_key] - 1], dim=-1
                 )
                 joint_sentence_probability = [probs[tokens[0]].item()]
 
                 # Don't include the prompt.
-                logits = logits[:, bias_type_to_position[self._bias_type] :, :]
+                logits = logits[:, bias_type_to_position[bias_type_key] :, :]
 
                 output = torch.softmax(logits, dim=-1)
 
@@ -623,7 +661,9 @@ class CrowSPairsRunner:
         with torch.no_grad():
             if self._is_self_debias:
                 # Get logits for masked tokens using self-debiasing (batched)
-                debiasing_prefixes = [DEBIASING_PREFIXES[self._bias_type]]
+                # Handle both string and list bias_type
+                bias_type_key = self._bias_type[0] if isinstance(self._bias_type, list) else self._bias_type
+                debiasing_prefixes = [DEBIASING_PREFIXES[bias_type_key]]
                 hidden_states_batch = self._model.get_token_logits_self_debiasing(
                     masked_token_ids_batch,
                     debiasing_prefixes=debiasing_prefixes,
@@ -674,8 +714,7 @@ class CrowSPairsRunner:
         )
 
         if self._bias_type is not None:
-            bias_key = "race-color" if self._bias_type == "race" else self._bias_type
-            df = df[df["bias_type"] == bias_key]
+            df = df[df["bias_type"].isin(self._bias_type)]
 
         df = df.rename(
             columns={
