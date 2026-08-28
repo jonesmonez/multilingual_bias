@@ -30,10 +30,16 @@ def _tokenize_paragraph(paragraph: str, lang: str):
         "it_IT": "italian",
     }
     if lang == "zh_CN":
-        return jieba.cut_sent(paragraph).lower()
+        return [
+            sentence.lower()
+            for sentence in jieba.cut_sent(paragraph)
+        ]
     else:
         nltk_lang = lang_map.get(lang, "english")
-    return nltk.sent_tokenize(paragraph, nltk_lang).lower()
+    return [
+        sentence.lower()
+        for sentence in nltk.sent_tokenize(paragraph, nltk_lang)
+    ]
 
 class SubspaceCalculator:
     def __init__(

@@ -37,10 +37,16 @@ def _tokenize_paragraph(paragraph: str, lang: str):
         "it_IT": "italian",
     }
     if lang == "zh_CN":
-        return jieba.cut_sent(paragraph).lower()
+        return [
+            sentence.lower()
+            for sentence in jieba.cut_sent(paragraph)
+        ]
     else:
         nltk_lang = lang_map.get(lang, "english")
-    return nltk.sent_tokenize(paragraph, nltk_lang).lower()
+    return [
+        sentence.lower()
+        for sentence in nltk.sent_tokenize(paragraph, nltk_lang)
+    ]
 
 def _parallel_sent_tokenize(lines, langs, n_workers=None):
     if n_workers is None:
@@ -284,7 +290,7 @@ class InlpRunner:
             tokens = tokenize_for_bias(
                 sentence,
                 self.lang_debias,
-                male_biased_token_set | female_biased_token_set
+                race_biased_token_set
             )
 
             race_flag = any(tok in race_biased_token_set for tok in tokens)
@@ -348,7 +354,7 @@ class InlpRunner:
             tokens = tokenize_for_bias(
                 sentence,
                 self.lang_debias,
-                male_biased_token_set | female_biased_token_set
+                religion_biased_token_set
             )
             
             religion_flag = any(tok in religion_biased_token_set for tok in tokens)
