@@ -17,6 +17,190 @@
             "aviadoras"
         ],
         [
+            "abogado",
+            "abogada"
+        ],
+        [
+            "abogados",
+            "abogadas"
+        ],
+        [
+            "arquitecto",
+            "arquitecta"
+        ],
+        [
+            "arquitectos",
+            "arquitectas"
+        ],
+        [
+            "científico",
+            "científica"
+        ],
+        [
+            "científicos",
+            "científicas"
+        ],
+        [
+            "director",
+            "directora"
+        ],
+        [
+            "directores",
+            "directoras"
+        ],
+        [
+            "doctor",
+            "doctora"
+        ],
+        [
+            "doctores",
+            "doctoras"
+        ],
+        [
+            "empleado",
+            "empleada"
+        ],
+        [
+            "empleados",
+            "empleadas"
+        ],
+        [
+            "enfermero",
+            "enfermera"
+        ],
+        [
+            "enfermeros",
+            "enfermeras"
+        ],
+        [
+            "escritor",
+            "escritora"
+        ],
+        [
+            "escritores",
+            "escritoras"
+        ],
+        [
+            "empresario",
+            "empresaria"
+        ],
+        [
+            "empresarios",
+            "empresarias"
+        ],
+        [
+            "ingeniero",
+            "ingeniera"
+        ],
+        [
+            "ingenieros",
+            "ingenieras"
+        ],
+        [
+            "investigador",
+            "investigadora"
+        ],
+        [
+            "investigadores",
+            "investigadoras"
+        ],
+        [
+            "jefe",
+            "jefa"
+        ],
+        [
+            "jefes",
+            "jefas"
+        ],
+        [
+            "maestro",
+            "maestra"
+        ],
+        [
+            "maestros",
+            "maestras"
+        ],
+        [
+            "médico",
+            "médica"
+        ],
+        [
+            "médicos",
+            "médicas"
+        ],
+        [
+            "ministro",
+            "ministra"
+        ],
+        [
+            "ministros",
+            "ministras"
+        ],
+        [
+            "político",
+            "política"
+        ],
+        [
+            "políticos",
+            "políticas"
+        ],
+        [
+            "profesor",
+            "profesora"
+        ],
+        [
+            "profesores",
+            "profesoras"
+        ],
+        [
+            "secretario",
+            "secretaria"
+        ],
+        [
+            "secretarios",
+            "secretarias"
+        ],
+        [
+            "senador",
+            "senadora"
+        ],
+        [
+            "senadores",
+            "senadoras"
+        ],
+        [
+            "trabajador",
+            "trabajadora"
+        ],
+        [
+            "trabajadores",
+            "trabajadoras"
+        ],
+        [
+            "vecino",
+            "vecina"
+        ],
+        [
+            "vecinos",
+            "vecinas"
+        ],
+        [
+            "vendedor",
+            "vendedora"
+        ],
+        [
+            "vendedores",
+            "vendedoras"
+        ],
+        [
+            "vocero",
+            "vocera"
+        ],
+        [
+            "voceros",
+            "voceras"
+        ],
+        [
             "tío",
             "tía"
         ],
@@ -33,6 +217,14 @@
             "niñas"
         ],
         [
+            "chico",
+            "chica"
+        ],
+        [
+            "chicos",
+            "chicas"
+        ],
+        [
             "novio",
             "novia"
         ],
@@ -41,44 +233,28 @@
             "novias"
         ],
         [
+            "amigo",
+            "amiga"
+        ],
+        [
+            "amigos",
+            "amigas"
+        ],
+        [
+            "compañero",
+            "compañera"
+        ],
+        [
+            "compañeros",
+            "compañeras"
+        ],
+        [
             "hermano",
             "hermana"
         ],
         [
             "hermanos",
             "hermanas"
-        ],
-        [
-            "empresario",
-            "empresaria"
-        ],
-        [
-            "empresarios",
-            "empresarias"
-        ],
-        [
-            "presidente",
-            "presidenta"
-        ],
-        [
-            "presidentes",
-            "presidentas"
-        ],
-        [
-            "papá",
-            "mamá"
-        ],
-        [
-            "papás",
-            "mamás"
-        ],
-        [
-            "papi",
-            "mami"
-        ],
-        [
-            "papis",
-            "mamis"
         ],
         [
             "hijo",
@@ -97,28 +273,12 @@
             "madres"
         ],
         [
-            "masculino",
-            "femenino"
+            "abuelo",
+            "abuela"
         ],
         [
-            "masculinos",
-            "femeninos"
-        ],
-        [
-            "chico",
-            "chica"
-        ],
-        [
-            "chicos",
-            "chicas"
-        ],
-        [
-            "caballero",
-            "dama"
-        ],
-        [
-            "caballeros",
-            "damas"
+            "abuelos",
+            "abuelas"
         ],
         [
             "nieto",
@@ -129,28 +289,36 @@
             "nietas"
         ],
         [
-            "él",
-            "ella"
-        ],
-        [
-            "él mismo",
-            "ella misma"
-        ],
-        [
-            "a él",
-            "a ella"
-        ],
-        [
-            "de él",
-            "de ella"
-        ],
-        [
             "esposo",
             "esposa"
         ],
         [
             "esposos",
             "esposas"
+        ],
+        [
+            "soltero",
+            "soltera"
+        ],
+        [
+            "solteros",
+            "solteras"
+        ],
+        [
+            "casado",
+            "casada"
+        ],
+        [
+            "casados",
+            "casadas"
+        ],
+        [
+            "viudo",
+            "viuda"
+        ],
+        [
+            "viudos",
+            "viudas"
         ],
         [
             "rey",
@@ -161,12 +329,28 @@
             "reinas"
         ],
         [
+            "príncipe",
+            "princesa"
+        ],
+        [
+            "príncipes",
+            "princesas"
+        ],
+        [
             "señor",
             "señora"
         ],
         [
             "señores",
             "señoras"
+        ],
+        [
+            "caballero",
+            "dama"
+        ],
+        [
+            "caballeros",
+            "damas"
         ],
         [
             "hombre",
@@ -177,20 +361,20 @@
             "mujeres"
         ],
         [
-            "príncipe",
-            "princesa"
+            "masculino",
+            "femenino"
         ],
         [
-            "príncipes",
-            "princesas"
+            "masculinos",
+            "femeninos"
         ],
         [
-            "vocero",
-            "vocera"
+            "él",
+            "ella"
         ],
         [
-            "voceros",
-            "voceras"
+            "ellos",
+            "ellas"
         ]
     ],
     "religion": [
@@ -228,31 +412,51 @@
     "race-color": [
         [
             "negro",
-            "caucásico",
-            "asiático"
-        ],
-        [
-            "africano",
-            "caucásico",
-            "asiático"
-        ],
-        [
-            "negro",
             "blanco",
             "asiático"
         ],
         [
+            "negros",
+            "blancos",
+            "asiáticos"
+        ],
+        [
+            "africano",
+            "europeo",
+            "asiático"
+        ],
+        [
+            "africanos",
+            "europeos",
+            "asiáticos"
+        ],
+        [
+            "negra",
+            "blanca",
+            "asiática"
+        ],
+        [
+            "negras",
+            "blancas",
+            "asiáticas"
+        ],
+        [
+            "África",
+            "Europa",
+            "Asia"
+        ],
+        [
             "áfrica",
-            "américa",
+            "europa",
             "asia"
         ],
         [
-            "áfrica",
-            "américa",
-            "china"
+            "América",
+            "Europa",
+            "Asia"
         ],
         [
-            "áfrica",
+            "américa",
             "europa",
             "asia"
         ]

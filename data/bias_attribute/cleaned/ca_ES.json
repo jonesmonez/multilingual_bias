@@ -17,32 +17,56 @@
             "aviadores"
         ],
         [
-            "oncle",
-            "tia"
+            "avi",
+            "àvia"
         ],
         [
-            "tiet",
-            "tieta"
+            "avis",
+            "àvies"
+        ],
+        [
+            "oncle",
+            "tia"
         ],
         [
             "oncles",
             "ties"
         ],
         [
+            "tiet",
+            "tieta"
+        ],
+        [
             "tiets",
             "tietes"
+        ],
+        [
+            "nebot",
+            "neboda"
+        ],
+        [
+            "nebots",
+            "nebodes"
+        ],
+        [
+            "cosí",
+            "cosina"
+        ],
+        [
+            "cosins",
+            "cosines"
         ],
         [
             "noi",
             "noia"
         ],
         [
-            "nen",
-            "nena"
-        ],
-        [
             "nois",
             "noies"
+        ],
+        [
+            "nen",
+            "nena"
         ],
         [
             "nens",
@@ -85,16 +109,24 @@
             "mare"
         ],
         [
+            "pares",
+            "mares"
+        ],
+        [
             "papa",
             "mama"
+        ],
+        [
+            "papàs",
+            "mamàs"
         ],
         [
             "papà",
             "mamà"
         ],
         [
-            "pares",
-            "mares"
+            "papàs",
+            "mamàs"
         ],
         [
             "fill",
@@ -105,44 +137,12 @@
             "filles"
         ],
         [
-            "mascle",
-            "femella"
-        ],
-        [
-            "mascles",
-            "femelles"
-        ],
-        [
-            "cavaller",
-            "dama"
-        ],
-        [
-            "cavallers",
-            "dames"
-        ],
-        [
-            "senyor",
-            "senyora"
-        ],
-        [
-            "senyors",
-            "senyores"
-        ],
-        [
             "net",
             "neta"
         ],
         [
             "nets",
             "netes"
-        ],
-        [
-            "ell",
-            "ella"
-        ],
-        [
-            "ell mateix",
-            "ella mateixa"
         ],
         [
             "marit",
@@ -161,6 +161,14 @@
             "esposes"
         ],
         [
+            "senyor",
+            "senyora"
+        ],
+        [
+            "senyors",
+            "senyores"
+        ],
+        [
             "rei",
             "reina"
         ],
@@ -169,8 +177,20 @@
             "reines"
         ],
         [
-            "senyor",
-            "dama"
+            "príncep",
+            "princesa"
+        ],
+        [
+            "prínceps",
+            "princeses"
+        ],
+        [
+            "cavaller",
+            "cavallera"
+        ],
+        [
+            "cavallers",
+            "cavalleres"
         ],
         [
             "home",
@@ -181,16 +201,88 @@
             "dones"
         ],
         [
-            "sr",
-            "sra"
+            "ell",
+            "ella"
         ],
         [
-            "príncep",
-            "princesa"
+            "mascle",
+            "femella"
         ],
         [
-            "prínceps",
-            "princeses"
+            "mascles",
+            "femelles"
+        ],
+        [
+            "metge",
+            "metgessa"
+        ],
+        [
+            "metges",
+            "metgesses"
+        ],
+        [
+            "advocat",
+            "advocada"
+        ],
+        [
+            "advocats",
+            "advocades"
+        ],
+        [
+            "infermer",
+            "infermera"
+        ],
+        [
+            "infermers",
+            "infermeres"
+        ],
+        [
+            "mestre",
+            "mestra"
+        ],
+        [
+            "mestres",
+            "mestres"
+        ],
+        [
+            "professor",
+            "professora"
+        ],
+        [
+            "professors",
+            "professores"
+        ],
+        [
+            "enginyer",
+            "enginyera"
+        ],
+        [
+            "enginyers",
+            "enginyeres"
+        ],
+        [
+            "investigador",
+            "investigadora"
+        ],
+        [
+            "investigadors",
+            "investigadores"
+        ],
+        [
+            "escriptor",
+            "escriptora"
+        ],
+        [
+            "escriptors",
+            "escriptores"
+        ],
+        [
+            "pintor",
+            "pintora"
+        ],
+        [
+            "pintors",
+            "pintores"
         ]
     ],
     "religion": [
@@ -228,33 +320,28 @@
     "race-color": [
         [
             "negre",
-            "caucàsic",
-            "asiàtic"
-        ],
-        [
-            "africà",
-            "caucàsic",
-            "asiàtic"
-        ],
-        [
-            "negre",
             "blanc",
             "asiàtic"
         ],
         [
-            "àfrica",
-            "amèrica",
-            "àsia"
+            "negres",
+            "blancs",
+            "asiàtics"
         ],
         [
-            "àfrica",
-            "amèrica",
-            "xina"
+            "africà",
+            "europeu",
+            "asiàtic"
         ],
         [
-            "àfrica",
-            "europa",
-            "àsia"
+            "africans",
+            "europeus",
+            "asiàtics"
+        ],
+        [
+            "Àfrica",
+            "Europa",
+            "Àsia"
         ]
     ]
 }
