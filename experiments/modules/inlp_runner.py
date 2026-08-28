@@ -1,11 +1,18 @@
+import os
+os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
 import json
 import nltk
 import torch
+import jieba
 import random
 import sklearn
-import transformers
+import itertools
 import numpy as np
+import transformers
+transformers.logging.set_verbosity_error()
 from pathlib import Path
+from functools import partial
+import multiprocessing as mp
 from sklearn.svm import LinearSVC
 try:
     from tqdm.notebook import tqdm
@@ -15,10 +22,96 @@ except ImportError:
 from bias_bench.model import models
 from bias_bench.debias.inlp import debias
 
-from experiments.modules.experiment_name  import filename
+from concurrent.futures import ProcessPoolExecutor
+from experiments.modules.experiment_name import filename
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+def _tokenize_paragraph(paragraph: str, lang: str):
+    lang_map = {
+        "en_US": "english",
+        "de_DE": "german",
+        "es_AR": "spanish",
+        "es_ES": "spanish",
+        "fr_FR": "french",
+        "it_IT": "italian",
+    }
+    if lang == "zh_CN":
+        return jieba.cut_sent(paragraph).lower()
+    else:
+        nltk_lang = lang_map.get(lang, "english")
+    return nltk.sent_tokenize(paragraph, nltk_lang).lower()
+
+def _parallel_sent_tokenize(lines, langs, n_workers=None):
+    if n_workers is None:
+        n_workers = max(1, mp.cpu_count() - 1)
+        
+    with ProcessPoolExecutor(max_workers=n_workers) as executor:
+        sentences = list(
+            itertools.chain.from_iterable(
+                executor.map(_tokenize_paragraph, lines, langs, chunksize=10)
+            )
+        )
+        
+    return sentences
+
+def _encode_sentence_batched(
+    sentences,
+    tokenizer,
+    model,
+    device,
+    batch_size: int = 32,
+    max_length: int = 128,
+    show_progress: bool = True,
+):
+    model.to(device)
+    model.eval()
+    all_vecs = []
+    
+    batch_iter = (
+        tqdm(
+            range(0, len(sentences), batch_size),
+            desc="Encoding sentences (batched)",
+            leave=False,
+            disable=not show_progress,
+        )
+        if show_progress
+        else range(0, len(sentences), batch_size)
+    )
+    
+    for start in batch_iter:
+        batch_sentences = sentences[start: start + batch_size]
+        
+        encoded = tokenizer(
+            batch_sentences,
+            add_special_tokens=True,
+            truncation=True,
+            max_length=max_length,
+            padding="longest",
+            return_tensors="pt",
+        ).to(device)
+        
+        with torch.no_grad():
+            outputs = model(**encoded)["last_hidden_state"]
+            mask = encoded["attention_mask"].unsqueeze(-1)
+            summed = torch.sum(outputs * mask, dim=1)
+            lengths = mask.sum(dim=1)
+            mean_pooled = summed / lengths
+            
+        all_vecs.append(mean_pooled.cpu().numpy())
+        
+    return np.concatenate(all_vecs, axis=0)
+
+def chinese_bias_aware_tokenize(sentence, attributes):
+    for attribute in sorted(set(attributes), key=len, reverse=True):
+        jieba.add_word(attribute, freq=10**8)
+
+    return list(jieba.cut(sentence, cut_all=False))
+
+def tokenize_for_bias(sentence, language, attributes=None):
+    if language == "zh_CN":
+        return chinese_bias_aware_tokenize(sentence, attributes)
+    return sentence.split(" ")
 
 class InlpRunner:
     def __init__(
@@ -26,19 +119,29 @@ class InlpRunner:
         model_class: str,
         model_name_or_path: str,
         save_result: bool = False,
-        save_path: Path = Path("results/"),
+        save_path: Path | None = None,
         verbose: bool = False,
+        compute_parallel: bool = False,
+        n_workers: int | None = None,
+        batch_size: int = 32,
     ):
+        if save_path is None:
+            save_path = Path(f"results/inlp/")
+            
         self.model_class = model_class
         self.model_name_or_path = model_name_or_path
         self.save_result = save_result
         self.save_path = save_path
         self.verbose = verbose
         
+        self.compute_parallel = compute_parallel
+        self.n_workers = n_workers
+        self.batch_size = batch_size
+
         self.model = getattr(models, self.model_class)(self.model_name_or_path)
         self.model.eval()
         self.tokenizer = transformers.AutoTokenizer.from_pretrained(self.model_name_or_path)
-
+        
     def setup_data(
         self,
         path_to_dataset: str,
@@ -78,9 +181,17 @@ class InlpRunner:
 
         male_biased_token_set = set([words[0] for words in attribute_words])
         female_biased_token_set = set([words[1] for words in attribute_words])
+        
+        if self.compute_parallel:
+            sentences = _parallel_sent_tokenize(lines, [self.lang_debias] * len(lines), n_workers=self.n_workers)
+        else:
+            sentences = []
+            for line in tqdm(lines, desc="Loading INLP Data", leave=False):
+                sentences.extend(_tokenize_paragraph(line, self.lang_debias))
 
         male_sentences = []
         female_sentences = []
+        neutral_sentences = []
 
         male_sentences_clipped = []
         female_sentences_clipped = []
@@ -88,95 +199,58 @@ class InlpRunner:
 
         # We collect 10000 of each class of sentences.
         n_sentences = 10000
-        count_male_sentences = 0
-        count_female_sentences = 0
-        count_neutral_sentences = 0
+        count_male = count_female = count_neutral = 0
 
-        for line in tqdm(lines, desc="Loading INLP data"):
-            # Each line contains a paragraph of text.
-            sentences = nltk.sent_tokenize(line.lower())
-
-            for sentence in sentences:
-                male_flag = False
-                female_flag = False
-
-                idx = -1
-                tokens = sentence.split(" ")
-
-                # Convert tokens to lower case.
-                tokens = [token.lower() for token in tokens]
-
-                # Skip sentences that are too short.
-                if len(tokens) < 5:
-                    continue
-
-                for token in tokens:
-                    # Find male definitional token.
-                    if token in male_biased_token_set:
-                        male_flag = True
-                        idx = tokens.index(token)
-
-                    # Find female definitional token.
-                    if token in female_biased_token_set:
-                        female_flag = True
-                        idx = tokens.index(token)
-
-                    # Both female and male tokens appear.
-                    if male_flag and female_flag:
-                        break
-
-                # If the sentence doesn't contain male or female tokens we consider
-                # it neutral.
-                if (
-                    not male_flag
-                    and not female_flag
-                    and count_neutral_sentences < n_sentences
-                ):
-                    # Start from the fourth token.
+        for sentence in sentences:
+            # tokens = sentence.split(" ")
+            tokens = tokenize_for_bias(
+                sentence,
+                self.lang_debias,
+                male_biased_token_set | female_biased_token_set
+            )
+            
+            male_flag = any(tok in male_biased_token_set for tok in tokens)
+            female_flag = any(tok in female_biased_token_set for tok in tokens)
+            
+            if(not male_flag and not female_flag and count_neutral < n_sentences):
+                if len(tokens) < 4:
+                    index = len(tokens)
+                else:
                     index = random.randint(4, len(tokens))
-                    neutral_sentences_clipped.append(" ".join(tokens[:index]))
-                    count_neutral_sentences += 1
-                    continue
-
-                # Both female and male tokens appear.
-                if male_flag and female_flag:
-                    continue
-
-                if male_flag and count_male_sentences < n_sentences:
-                    # Prevent duplicate sentences.
-                    if sentence not in male_sentences:
-                        male_sentences.append(sentence)
-                        index = random.randint(idx, len(tokens))
-                        male_sentences_clipped.append(" ".join(tokens[: index + 1]))
-                        count_male_sentences += 1
-
-                if female_flag and count_female_sentences < n_sentences:
-                    if sentence not in female_sentences:
-                        female_sentences.append(sentence)
-                        index = random.randint(idx, len(tokens))
-                        female_sentences_clipped.append(" ".join(tokens[: index + 1]))
-                        count_female_sentences += 1
-
-            if (
-                count_male_sentences
-                == count_female_sentences
-                == count_neutral_sentences
-                == n_sentences
-            ):
-                if self.verbose:
-                    print("INLP dataset collected:")
-                    print(f" - Num. male sentences: {count_male_sentences}")
-                    print(f" - Num. female sentences: {count_female_sentences}")
-                    print(f" - Num. neutral sentences: {count_neutral_sentences}")
+                neutral_sentences_clipped.append(" ".join(tokens[:index]))
+                count_neutral += 1
+                continue
+            
+            if male_flag and count_male < n_sentences:
+                if sentence not in male_sentences:
+                    male_sentences.append(sentence)
+                    idx = next(i for i, t in enumerate(tokens) if t in male_biased_token_set)
+                    index = random.randint(idx, len(tokens))
+                    male_sentences_clipped.append(" ".join(tokens[: index + 1]))
+                    count_male += 1
+                    
+            if female_flag and count_female < n_sentences:
+                if sentence not in female_sentences:
+                    female_sentences.append(sentence)
+                    idx = next(i for i, t in enumerate(tokens) if t in female_biased_token_set)
+                    index = random.randint(idx, len(tokens))
+                    female_sentences_clipped.append(" ".join(tokens[: index + 1]))
+                    count_female += 1
+                
+            if (count_male == count_female == count_neutral == n_sentences):
                 break
-
-        data = {
+            
+        if self.verbose:
+            print("INLP dataset collected:")
+            print(f" - Num. male sentences: {count_male}")
+            print(f" - Num. female sentences: {count_female}")
+            print(f" - Num. neutral sentences: {count_neutral}")
+            
+        return {
             "male": male_sentences_clipped,
             "female": female_sentences_clipped,
             "neutral": neutral_sentences_clipped,
         }
-
-        return data
 
     def _load_race_data(self):
         with open(f"{self.path_to_bias_attributes}", "r", encoding="UTF-8") as f:
@@ -185,8 +259,9 @@ class InlpRunner:
             lines = f.readlines()
         random.shuffle(lines)
 
-        # Flatten the list of race words.
-        race_biased_token_set = set([word for words in attribute_words for word in words])
+        race_biased_token_set = set(
+            [word for words in attribute_words for word in words]
+        )
 
         race_sentences = []
         race_sentences_clipped = []
@@ -194,59 +269,52 @@ class InlpRunner:
 
         # We collect 10000 of each class of sentences.
         n_sentences = 10000
-        count_race_sentences = 0
-        count_neutral_sentences = 0
+        count_race = 0
+        count_neutral = 0
 
-        
+        if self.compute_parallel:
+            sentences = _parallel_sent_tokenize(lines, [self.lang_debias] * len(lines), n_workers=self.n_workers)
+        else:
+            sentences = []
+            for line in tqdm(lines, desc="Loading INLP data", leave=False):
+                sentences.extend(_tokenize_paragraph(line, self.lang_debias))
 
-        for line in tqdm(lines, desc="Loading INLP data"):
-            # Each line contains a paragraph of text.
-            sentences = nltk.sent_tokenize(line.lower())
+        for sentence in sentences:
+            # tokens = sentence.split(" ")
+            tokens = tokenize_for_bias(
+                sentence,
+                self.lang_debias,
+                male_biased_token_set | female_biased_token_set
+            )
 
-            for sentence in sentences:
-                race_flag = False
-
-                idx = -1
-                tokens = sentence.split(" ")
-
-                # Convert tokens to lower case.
-                tokens = [token.lower() for token in tokens]
-
-                # Skip sentences that are too short.
-                if len(tokens) < 5:
-                    continue
-
-                for token in tokens:
-                    if token in race_biased_token_set:
-                        race_flag = True
-                        idx = tokens.index(token)
-
-                # If the sentence doesn't contain a racial word we consider it neutral.
-                if not race_flag and count_neutral_sentences < n_sentences:
-                    # Start from the fourth token.
+            race_flag = any(tok in race_biased_token_set for tok in tokens)
+            
+            if (not race_flag and count_neutral < n_sentences):
+                if len(tokens) < 4:
+                    index = len(tokens)
+                else:
                     index = random.randint(4, len(tokens))
-                    neutral_sentences_clipped.append(" ".join(tokens[:index]))
-                    count_neutral_sentences += 1
-                    continue
-
-                if race_flag and count_race_sentences < n_sentences:
-                    # Prevent duplicate sentences.
-                    if sentence not in race_sentences:
-                        race_sentences.append(sentence)
-                        index = random.randint(idx, len(tokens))
-                        race_sentences_clipped.append(" ".join(tokens[: index + 1]))
-                        count_race_sentences += 1
-
-            if count_race_sentences == count_neutral_sentences == n_sentences:
-                if self.verbose:
-                    print("INLP dataset collected:")
-                    print(f" - Num. bias sentences: {count_race_sentences}")
-                    print(f" - Num. neutral sentences: {count_neutral_sentences}")
+                neutral_sentences_clipped.append(" ".join(tokens[:index]))
+                count_neutral += 1
+                continue
+            
+            if race_flag and count_race < n_sentences:
+                if sentence not in race_sentences:
+                    race_sentences.append(sentence)
+                    idx = next(i for i, t in enumerate(tokens) if t in race_biased_token_set)
+                    index = random.randint(idx, len(tokens))
+                    race_sentences_clipped.append(" ".join(tokens[: index + 1]))
+                    count_race += 1
+                    
+            if count_race == count_neutral == n_sentences:
                 break
 
-        data = {"bias": race_sentences_clipped, "neutral": neutral_sentences_clipped}
+        if self.verbose:
+            print("INLP dataset collected:")
+            print(f" - Num. bias sentences: {count_race}")
+            print(f" - Num. neutral sentences: {count_neutral}")
 
-        return data
+        return {"bias": race_sentences_clipped, "neutral": neutral_sentences_clipped}
 
     def _load_religion_data(self):
         with open(f"{self.path_to_bias_attributes}", "r", encoding="UTF-8") as f:
@@ -255,7 +323,6 @@ class InlpRunner:
             lines = f.readlines()
         random.shuffle(lines)
 
-        # Flatten the list of race words.
         religion_biased_token_set = set(
             [word for words in attribute_words for word in words]
         )
@@ -266,57 +333,52 @@ class InlpRunner:
 
         # We collect 10000 of each class of sentences.
         n_sentences = 10000
-        count_religion_sentences = 0
-        count_neutral_sentences = 0
+        count_religion = 0
+        count_neutral = 0
 
-        for line in tqdm(lines, desc="Loading INLP data"):
-            # Each line contains a paragraph of text.
-            sentences = nltk.sent_tokenize(line.lower())
+        if self.compute_parallel:
+            sentences = _parallel_sent_tokenize(lines, [self.lang_debias] * len(lines), n_workers=self.n_workers)
+        else:
+            sentences = []
+            for line in tqdm(lines, desc="Loading INLP data", leave=False):
+                sentences.extend(_tokenize_paragraph(line, self.lang_debias))
 
-            for sentence in sentences:
-                religion_flag = False
-
-                idx = -1
-                tokens = sentence.split(" ")
-
-                # Convert tokens to lower case.
-                tokens = [token.lower() for token in tokens]
-
-                # Skip sentences that are too short.
-                if len(tokens) < 5:
-                    continue
-
-                for token in tokens:
-                    if token in religion_biased_token_set:
-                        religion_flag = True
-                        idx = tokens.index(token)
-
-                # If the sentence doesn't contain a religious word we consider it neutral.
-                if not religion_flag and count_neutral_sentences < n_sentences:
+        for sentence in sentences:
+            # tokens = sentence.split(" ")
+            tokens = tokenize_for_bias(
+                sentence,
+                self.lang_debias,
+                male_biased_token_set | female_biased_token_set
+            )
+            
+            religion_flag = any(tok in religion_biased_token_set for tok in tokens)
+            
+            if (not religion_flag and count_neutral < n_sentences):
+                if len(tokens) < 4:
+                    index = len(tokens)
+                else:
                     index = random.randint(4, len(tokens))
-                    neutral_sentences_clipped.append(" ".join(tokens[:index]))
-                    count_neutral_sentences += 1
-                    continue
+                neutral_sentences_clipped.append(" ".join(tokens[:index]))
+                count_neutral += 1
+                continue
 
-                if religion_flag and count_religion_sentences < n_sentences:
-                    # Prevent duplicate sentences.
-                    if sentence not in religion_sentences:
-                        religion_sentences.append(sentence)
-                        index = random.randint(idx, len(tokens))
-                        religion_sentences_clipped.append(" ".join(tokens[: index + 1]))
-                        count_religion_sentences += 1
+            if religion_flag and count_religion < n_sentences:
+                if sentence not in religion_sentences:
+                    religion_sentences.append(sentence)
+                    idx = next(i for i, t in enumerate(tokens) if t in religion_biased_token_set)
+                    index = random.randint(idx, len(tokens))
+                    religion_sentences_clipped.append(" ".join(tokens[: index + 1]))
+                    count_religion += 1
 
-            if count_religion_sentences == count_neutral_sentences == n_sentences:
-                if self.verbose:
-                    print("INLP dataset collected:")
-                    print(f" - Num. bias sentences: {count_religion_sentences}")
-                    print(f" - Num. neutral sentences: {count_neutral_sentences}")
+            if count_religion == count_neutral == n_sentences:
                 break
+        
+        if self.verbose:
+            print("INLP dataset collected:")
+            print(f" - Num. bias sentences: {count_religion}")
+            print(f" - Num. neutral sentences: {count_neutral}")
 
-        data = {"bias": religion_sentences_clipped, "neutral": neutral_sentences_clipped}
-
-        return data
-
+        return {"bias": religion_sentences_clipped, "neutral": neutral_sentences_clipped}
 
     def _extract_gender_features(
         self,
@@ -326,100 +388,116 @@ class InlpRunner:
         female_sentences,
         neutral_sentences,
     ):
-        """Encodes gender sentences to create a set of representations to train classifiers
-        for INLP on.
+        if self.compute_parallel:
+            male_features = _encode_sentence_batched(
+                male_sentences,
+                tokenizer,
+                model,
+                device,
+                batch_size=self.batch_size,
+                show_progress=True,
+            )
+            female_features = _encode_sentence_batched(
+                female_sentences,
+                tokenizer,
+                model,
+                device,
+                batch_size=self.batch_size,
+                show_progress=True,
+            )
+            neutral_features = _encode_sentence_batched(
+                neutral_sentences,
+                tokenizer,
+                model,
+                device,
+                batch_size=self.batch_size,
+                show_progress=True,
+            )
+            return male_features, female_features, neutral_features
+        else:
+            model.to(device)
+            model.eval()
 
-        Notes:
-            * Implementation taken from  https://github.com/pliang279/LM_bias.
-        """
-        model.to(device)
+            male_features = []
+            female_features = []
+            neutral_features = []
 
-        male_features = []
-        female_features = []
-        neutral_features = []
+            with torch.no_grad():
+                for sentence in tqdm(male_sentences, desc="Encoding male sentences", leave=False):
+                    input_ids = tokenizer(
+                        sentence, add_special_tokens=True, truncation=True, return_tensors="pt"
+                    ).to(device)
 
-        # Encode the sentences.
-        with torch.no_grad():
-            for sentence in tqdm(male_sentences, desc="Encoding male sentences"):
-                input_ids = tokenizer(
-                    sentence, add_special_tokens=True, truncation=True, return_tensors="pt"
-                ).to(device)
+                    outputs = model(**input_ids)["last_hidden_state"]
+                    outputs = torch.mean(outputs, dim=1).squeeze().detach().cpu().numpy()
+                    male_features.append(outputs)
 
-                outputs = model(**input_ids)["last_hidden_state"]
-                outputs = torch.mean(outputs, dim=1)
-                outputs = outputs.squeeze().detach().cpu().numpy()
+                for sentence in tqdm(female_sentences, desc="Encoding female sentences", leave=False):
+                    input_ids = tokenizer(
+                        sentence, add_special_tokens=True, truncation=True, return_tensors="pt"
+                    ).to(device)
 
-                male_features.append(outputs)
+                    outputs = model(**input_ids)["last_hidden_state"]
+                    outputs = torch.mean(outputs, dim=1).squeeze().detach().cpu().numpy()
+                    female_features.append(outputs)
 
-            for sentence in tqdm(female_sentences, desc="Encoding female sentences"):
-                input_ids = tokenizer(
-                    sentence, add_special_tokens=True, truncation=True, return_tensors="pt"
-                ).to(device)
+                for sentence in tqdm(neutral_sentences, desc="Encoding neutral sentences", leave=False):
+                    input_ids = tokenizer(
+                        sentence, add_special_tokens=True, truncation=True, return_tensors="pt"
+                    ).to(device)
 
-                outputs = model(**input_ids)["last_hidden_state"]
-                outputs = torch.mean(outputs, dim=1)
-                outputs = outputs.squeeze().detach().cpu().numpy()
+                    outputs = model(**input_ids)["last_hidden_state"]
+                    outputs = torch.mean(outputs, dim=1).squeeze().detach().cpu().numpy()
+                    neutral_features.append(outputs)
 
-                female_features.append(outputs)
-
-            for sentence in tqdm(neutral_sentences, desc="Encoding neutral sentences"):
-                input_ids = tokenizer(
-                    sentence, add_special_tokens=True, truncation=True, return_tensors="pt"
-                ).to(device)
-
-                outputs = model(**input_ids)["last_hidden_state"]
-                outputs = torch.mean(outputs, dim=1)
-                outputs = outputs.squeeze().detach().cpu().numpy()
-
-                neutral_features.append(outputs)
-
-        male_features = np.array(male_features)
-        female_features = np.array(female_features)
-        neutral_features = np.array(neutral_features)
-
-        return male_features, female_features, neutral_features
+            return np.array(male_features), np.array(female_features), np.array(neutral_features)
 
     def _extract_binary_features(self, model, tokenizer, bias_sentences, neutral_sentences):
-        """Encodes race/religion sentences to create a set of representations to train classifiers
-        for INLP on.
+        if self.compute_parallel:
+            bias_features = _encode_sentence_batched(
+                bias_sentences,
+                tokenizer,
+                model,
+                device,
+                batch_size=self.batch_size,
+                show_progress=True,
+            )
+            neutral_features = _encode_sentence_batched(
+                neutral_sentences,
+                tokenizer,
+                model,
+                device,
+                batch_size=self.batch_size,
+                show_progress=True,
+            )
+            return bias_features, neutral_features
+        else:
+            model.to(device)
+            model.eval()
 
-        Notes:
-            * Sentences are split into two classes based upon if they contain *any* race/religion bias
-            attribute words.
-        """
-        model.to(device)
+            bias_features = []
+            neutral_features = []
 
-        bias_features = []
-        neutral_features = []
+            with torch.no_grad():
+                for sentence in tqdm(bias_sentences, desc="Encoding bias sentences", leave=False):
+                    input_ids = tokenizer(
+                        sentence, add_special_tokens=True, truncation=True, return_tensors="pt"
+                    ).to(device)
 
-        # Encode the sentences.
-        with torch.no_grad():
-            for sentence in tqdm(bias_sentences, desc="Encoding bias sentences"):
-                input_ids = tokenizer(
-                    sentence, add_special_tokens=True, truncation=True, return_tensors="pt"
-                ).to(device)
+                    outputs = model(**input_ids)["last_hidden_state"]
+                    outputs = torch.mean(outputs, dim=1).squeeze().detach().cpu().numpy()
+                    bias_features.append(outputs)
 
-                outputs = model(**input_ids)["last_hidden_state"]
-                outputs = torch.mean(outputs, dim=1)
-                outputs = outputs.squeeze().detach().cpu().numpy()
+                for sentence in tqdm(neutral_sentences, desc="Encoding neutral sentences", leave=False):
+                    input_ids = tokenizer(
+                        sentence, add_special_tokens=True, truncation=True, return_tensors="pt"
+                    ).to(device)
 
-                bias_features.append(outputs)
+                    outputs = model(**input_ids)["last_hidden_state"]
+                    outputs = torch.mean(outputs, dim=1).squeeze().detach().cpu().numpy()
+                    neutral_features.append(outputs)
 
-            for sentence in tqdm(neutral_sentences, desc="Encoding neutral sentences"):
-                input_ids = tokenizer(
-                    sentence, add_special_tokens=True, truncation=True, return_tensors="pt"
-                ).to(device)
-
-                outputs = model(**input_ids)["last_hidden_state"]
-                outputs = torch.mean(outputs, dim=1)
-                outputs = outputs.squeeze().detach().cpu().numpy()
-
-                neutral_features.append(outputs)
-
-        bias_features = np.array(bias_features)
-        neutral_features = np.array(neutral_features)
-
-        return bias_features, neutral_features
+            return np.array(bias_features), np.array(neutral_features)
 
     def _split_gender_dataset(self, male_feat, female_feat, neut_feat):
         np.random.seed(self.seed)
@@ -528,10 +606,11 @@ class InlpRunner:
         P = torch.tensor(P, dtype=torch.float32)
 
         if self.save_result:
-            name = filename("inlp", self.bias_type, self.lang_debias) + ".pt"
-            self.save_path.mkdir(parents=True, exist_ok=True)
-            torch.save(P, self.save_path / name)
+            path = self.save_path / self.lang_debias
+            name = f"{self.bias_type}.pt"
+            path.mkdir(parents=True, exist_ok=True)
+            torch.save(P, path / name)
             if self.verbose:
-                print(f"Saving to \"{self.save_dir}projectionmatrix.pt\"")
+                print(f"Saving to \"{path}/{path}\"")
         
         return P

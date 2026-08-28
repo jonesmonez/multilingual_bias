@@ -15,6 +15,26 @@ from sklearn.decomposition import PCA
 from bias_bench.model import models
 from experiments.modules.experiment_name import filename
 
+import multiprocessing as mp
+from concurrent.futures import ProcessPoolExecutor
+import itertools
+import jieba
+
+def _tokenize_paragraph(paragraph: str, lang: str):
+    lang_map = {
+        "en_US": "english",
+        "de_DE": "german",
+        "es_AR": "spanish",
+        "es_ES": "spanish",
+        "fr_FR": "french",
+        "it_IT": "italian",
+    }
+    if lang == "zh_CN":
+        return jieba.cut_sent(paragraph).lower()
+    else:
+        nltk_lang = lang_map.get(lang, "english")
+    return nltk.sent_tokenize(paragraph, nltk_lang).lower()
+
 class SubspaceCalculator:
     def __init__(
         self,
@@ -134,9 +154,10 @@ class SubspaceCalculator:
         self.all_embeddings_female = np.concatenate(self.all_embeddings_female, axis=0)
 
     def save_output(self, to_save_data, method, bias_type):
-        name = filename(method, bias_type, self.lang_debias) + ".pt"
-        self.save_path.mkdir(parents=True, exist_ok=True)
-        torch.save(to_save_data, self.save_path / name)
+        name = f"{bias_type}.pt"
+        path = self.save_path / self.lang_debias
+        path.mkdir(parents=True, exist_ok=True)
+        torch.save(to_save_data, path / name)
 
 class SentenceDebiasWrapper(SubspaceCalculator):
     def __init__(
@@ -145,7 +166,7 @@ class SentenceDebiasWrapper(SubspaceCalculator):
         model_name_or_path: str = "bert-base-multilingual-uncased",
         batch_size: int = 32,
         save_result: bool = False,
-        save_path: Path = Path("results/"),
+        save_path: Path = Path("results/sentdebias/"),
         verbose: bool = False,
     ):
         super().__init__(
@@ -409,7 +430,7 @@ class DensrayDebiasWrapper(SubspaceCalculator):
         model_name_or_path: str = "bert-base-multilingual-uncased",
         batch_size: int = 32,
         save_result: bool = False,
-        save_path: Path = Path("results/"),
+        save_path: Path = Path("results/densray/"),
         verbose: bool = False,
     ):
         super().__init__(
@@ -677,7 +698,7 @@ class _GenericDataset(_SentenceDebiasDataset):
         path_to_text_corpus
     ):
         super().__init__(path_to_bias_attributes, lang_debias)
-        self._path_corpus = path_to_text_corpus
+        self._path_corpus = path_to_text_corpust
         
     def load_examples(self, n_max_sent):
         with open(self._path_corpus, "r", encoding="UTF-8") as f:
@@ -685,8 +706,8 @@ class _GenericDataset(_SentenceDebiasDataset):
 
         self.tokenized_data = []
         for line in tqdm(lines[:n_max_sent], desc=f"Sentence tokenizing {self._lang_debias}", leave=False):
-            line = line.lower()
-            self.tokenized_data.extend(nltk.sent_tokenize(line))
+            sentences = _tokenize_paragraph(line, self._lang_debias)
+            self.tokenized_data.extend(sentences)
         
 
     def collect_counterfactual_sents(self, bias_type):
