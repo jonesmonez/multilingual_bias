@@ -698,7 +698,7 @@ class _GenericDataset(_SentenceDebiasDataset):
         path_to_text_corpus
     ):
         super().__init__(path_to_bias_attributes, lang_debias)
-        self._path_corpus = path_to_text_corpust
+        self._path_corpus = path_to_text_corpus
         
     def load_examples(self, n_max_sent):
         with open(self._path_corpus, "r", encoding="UTF-8") as f:

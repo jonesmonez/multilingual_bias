@@ -1,8 +1,10 @@
 import os
+os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
 import json
 import shutil
 import random
 from pathlib import Path
+from dataclasses import dataclass
 from typing import List, Union, Literal, Optional, Dict, Any
 
 import torch
@@ -26,6 +28,85 @@ from transformers import (
     TrainerControl,
 )
 
+_worker_tok = None
+_worker_max_len = None
+
+def _init_worker(tok_name: str, max_len: int):
+    global _worker_tok, _worker_max_len
+    _worker_tok = AutoTokenizer.from_pretrained(tok_name, use_fast=True)
+    _worker_max_len = max_len
+
+def _worker(text: str) -> Dict[str, Any]:
+    enc = _worker_tok(
+        text,
+        add_special_tokens=False,
+        return_special_tokens_mask=True,
+        truncation=True,
+        max_length=_worker_max_len,
+    )
+    return {
+        "input_ids": enc["input_ids"],
+        "attention_mask": enc["attention_mask"],
+    }
+
+
+def _build_gender_mapping(attr_pairs):
+    mapping = {}
+    for male, female in attr_pairs:
+        mapping[male] = female
+        mapping[female] = male
+    return mapping
+
+
+def _build_ternary_mapping(attr_pairs):
+    mapping = {}
+    for triple in attr_pairs:
+        w0, w1, w2 = triple
+        mapping[w0] = [w1, w2]
+        mapping[w1] = [w0, w2]
+        mapping[w2] = [w0, w1]
+    return mapping
+
+def _process_one_sentence(
+    text: str,
+    tokenizer,
+    max_seq_length: int,
+    bias_type: Optional[str],
+    word_mapping: Optional[Dict],
+) -> List[Dict[str, Any]]:
+    tokenized = tokenizer(
+        text,
+        add_special_tokens=False,
+        return_special_tokens_mask=True,
+        truncation=True,
+        max_length=max_seq_length,
+    )
+    example_batch = {"input_ids": [tokenized["input_ids"]]}
+
+    if bias_type == "gender":
+        aug_result = gender_counterfactual_augmentation(
+            example_batch, word_mapping, tokenizer, max_seq_length
+        )
+    elif bias_type in ("race-color", "religion"):
+        aug_result = ternary_counterfactual_augmentation(
+            example_batch, word_mapping, tokenizer, max_seq_length
+        )
+    else:
+        aug_result = {
+            "input_ids": [tokenized["input_ids"]],
+            "attention_mask": [tokenized["attention_mask"]],
+            "return_special_tokens_mask": [tokenized["return_special_tokens_mask"]],
+        }
+
+    out: List[Dict[str, Any]] = []
+    for i in range(len(aug_result["input_ids"])):
+        out.append(
+            {
+                "input_ids": aug_result["input_ids"][i],
+                "attention_mask": aug_result["attention_mask"][i],
+            }
+        )
+    return out
 
 def load_bias_attributes(json_path: Union[str, os.PathLike], bias_type: str):
     with open(json_path, "r", encoding="utf-8") as f:
@@ -58,111 +139,56 @@ def _create_bias_attribute_words(attribute_file, bias_type):
             result.append(augmented_words)
     return result
 
-def gender_counterfactual_augmentation(examples, bias_attribute_words, tokenizer, max_seq_length):
-    """Applies gender counterfactual data augmentation to a batch of examples.
-
-    Notes:
-        * We apply CDA after the examples have potentially been grouped.
-        * This implementation can be made more efficient by operating on
-          token IDs as opposed to text. We currently decode each example
-          as it is simpler.
-    """
+def gender_counterfactual_augmentation(examples, word_mapping, tokenizer, max_seq_length):
     outputs = []
     for input_ids in examples["input_ids"]:
-        # For simplicity, decode each example. It is easier to apply augmentation
-        # on text as opposed to token IDs.
         sentence = tokenizer.decode(input_ids)
-        words = sentence.split()  # Tokenize based on whitespace.
-        augmented_sentence = words[:]
-
+        words = sentence.split()
         augmented = False
-        for position, word in enumerate(words):
-            for male_word, female_word in bias_attribute_words:
-                if male_word == word:
-                    augmented = True
-                    augmented_sentence[position] = female_word
-
-                if female_word == word:
-                    augmented = True
-                    augmented_sentence[position] = male_word
-
+        new_words = words[:]
+        for i, w in enumerate(words):
+            if w in word_mapping:
+                augmented = True
+                new_words[i] = word_mapping[w]
         if augmented:
-            augmented_sentence = " ".join(augmented_sentence)
+            augmented_sentence = " ".join(new_words)
             outputs.append(augmented_sentence)
             outputs.append(sentence)
 
-    # There are potentially no counterfactual examples.
     if not outputs:
         return {"input_ids": [], "attention_mask": [], "return_special_tokens_mask": []}
 
     return tokenizer(
         outputs,
         return_special_tokens_mask=True,
-        add_special_tokens=False,  # Special tokens are already added.
+        add_special_tokens=False,
         truncation=True,
         max_length=max_seq_length,
     )
 
-def ternary_counterfactual_augmentation(examples, bias_attribute_words, tokenizer, max_seq_length):
-    """Applies racial/religious counterfactual data augmentation to a batch of
-    examples.
-
-    Notes:
-        * We apply CDA after the examples have potentially been grouped.
-        * This implementation can be made more efficient by operating on
-          token IDs as opposed to text. We currently decode each example
-          as it is simpler.
-    """
+def ternary_counterfactual_augmentation(examples, word_mapping, tokenizer, max_seq_length):
     outputs = []
     for input_ids in examples["input_ids"]:
-        # For simplicity, decode each example. It is easier to apply augmentation
-        # on text as opposed to token IDs.
         sentence = tokenizer.decode(input_ids)
-        words = sentence.split()  # Tokenize based on whitespace.
-        augmented_sentence = words[:]
-
-        # Sample the augmentation pairs.
-        r1_augmentation_pair = random.choice([1, 2])
-        r2_augmentation_pair = random.choice([0, 2])
-        r3_augmentation_pair = random.choice([0, 1])
-
+        words = sentence.split()
         augmented = False
-        for position, word in enumerate(words):
-            for augmentation_words in bias_attribute_words:
-                # Implementation here.
-                r1_word, r2_word, r3_word = augmentation_words
-
-                if r1_word == word:
-                    augmented = True
-                    augmented_sentence[position] = augmentation_words[
-                        r1_augmentation_pair
-                    ]
-
-                if r2_word == word:
-                    augmented = True
-                    augmented_sentence[position] = augmentation_words[
-                        r2_augmentation_pair
-                    ]
-
-                if r3_word == word:
-                    augmented = True
-                    augmented_sentence[position] = augmentation_words[
-                        r3_augmentation_pair
-                    ]
-
+        new_words = words[:]
+        for i, w in enumerate(words):
+            if w in word_mapping:
+                augmented = True
+                new_words[i] = random.choice(word_mapping[w])
         if augmented:
-            augmented_sentence = " ".join(augmented_sentence)
+            augmented_sentence = " ".join(new_words)
             outputs.append(augmented_sentence)
             outputs.append(sentence)
 
-    # There are potentially no counterfactual examples.
     if not outputs:
         return {"input_ids": [], "attention_mask": [], "return_special_tokens_mask": []}
 
     return tokenizer(
         outputs,
         return_special_tokens_mask=True,
-        add_special_tokens=False,  # Special tokens are already added.
+        add_special_tokens=False,
         truncation=True,
         max_length=max_seq_length,
     )
@@ -177,6 +203,8 @@ class CDADataset(Dataset):
         bias_attribute_json: Union[str, os.PathLike] = None,
         mlm_probability: float = 0.15,
         max_train_samples: Optional[int] = None,
+        compute_parallel: bool = False,
+        n_workers: int | None = None,
     ):
         self.tokenizer = tokenizer
         self.max_seq_length = max_seq_length
@@ -186,75 +214,107 @@ class CDADataset(Dataset):
         with open(raw_text_path, "r", encoding="utf-8") as f:
             self.raw_lines = [
                 ln.strip()
-                for ln in tqdm(f, desc="Loading corpus", unit="line")
+                for ln in f
                 if ln.strip()
             ]
 
-        # Apply max_train_samples after augmentation (to match run_mlm)
         self.use_cda = bias_type is not None and bias_attribute_json is not None
         if self.use_cda:
             self.bias_type = bias_type
-            # Create bias attribute words with punctuation
             self.attr_pairs = _create_bias_attribute_words(bias_attribute_json, bias_type)
-            # Precompute all augmented examples (tokenized) to avoid length mismatch
+            if bias_type == "gender":
+                self.word_mapping = _build_gender_mapping(self.attr_pairs)
+            else:
+                self.word_mapping = _build_ternary_mapping(self.attr_pairs)
             self.examples = []
-            for text in self.raw_lines:
-                # Prepare a single-example batch for the augmentation functions
-                # Tokenize without special tokens to match run_mlm's expectation
-                tokenized = self.tokenizer(
-                    text,
-                    add_special_tokens=False,
-                    return_special_tokens_mask=True,
-                    truncation=True,
-                    max_length=self.max_seq_length,
-                )
-                # The augmentation functions expect a dict with "input_ids" list of list
-                examples_batch = {"input_ids": [tokenized["input_ids"]]}
-                if bias_type == "gender":
-                    aug_result = gender_counterfactual_augmentation(
-                        examples_batch, self.attr_pairs, self.tokenizer, self.max_seq_length
+
+            if compute_parallel:
+                from multiprocessing import Pool
+
+                args = [
+                    (
+                        text,
+                        self.tokenizer,
+                        self.max_seq_length,
+                        self.bias_type,
+                        self.word_mapping,
                     )
-                else:  # race or religion
-                    aug_result = ternary_counterfactual_augmentation(
-                        examples_batch, self.attr_pairs, self.tokenizer, self.max_seq_length
+                    for text in self.raw_lines
+                ]
+
+                with Pool(processes=n_workers) as pool:
+                    list_of_lists = pool.starmap(_process_one_sentence, args)
+
+                for examples in list_of_lists:
+                    self.examples.extend(examples)
+            else:
+                for text in self.raw_lines:
+                    tokenized = self.tokenizer(
+                        text,
+                        add_special_tokens=False,
+                        return_special_tokens_mask=True,
+                        truncation=True,
+                        max_length=self.max_seq_length,
                     )
-                # aug_result contains tokenized dicts for augmented + original (if any)
-                # Extract input_ids and attention_mask lists
-                if len(aug_result["input_ids"]) > 0:
-                    for i in range(len(aug_result["input_ids"])):
-                        self.examples.append(
-                            {
-                                "input_ids": aug_result["input_ids"][i],
-                                "attention_mask": aug_result["attention_mask"][i],
-                            }
+                    examples_batch = {"input_ids": [tokenized["input_ids"]]}
+                    if bias_type == "gender":
+                        aug_result = gender_counterfactual_augmentation(
+                            examples_batch, self.word_mapping, self.tokenizer, self.max_seq_length
                         )
-                # else: no augmentation -> skip (example removed)
+                    else:
+                        aug_result = ternary_counterfactual_augmentation(
+                            examples_batch, self.word_mapping, self.tokenizer, self.max_seq_length
+                        )
+
+                    if len(aug_result["input_ids"]) > 0:
+                        for i in range(len(aug_result["input_ids"])):
+                            self.examples.append(
+                                {
+                                    "input_ids": aug_result["input_ids"][i],
+                                    "attention_mask": aug_result["attention_mask"][i],
+                                }
+                            )
         else:
             self.attr_pairs = None
             self.bias_type = None
-            # No augmentation, tokenize raw lines
+            self.word_mapping = None
             self.examples = []
-            for text in self.raw_lines:
-                enc = self.tokenizer(
-                    text,
-                    add_special_tokens=False,
-                    return_special_tokens_mask=True,
-                    truncation=True,
-                    max_length=self.max_seq_length,
-                )
-                self.examples.append(
-                    {
-                        "input_ids": enc["input_ids"],
-                        "attention_mask": enc["attention_mask"],
-                    }
-                )
 
-        # Apply max_train_samples after building examples
+            if compute_parallel:
+                from multiprocessing import Pool
+
+                tokenizer_name = self.tokenizer.name_or_path
+                args = [
+                    (text,)
+                    for text in self.raw_lines
+                ]
+
+                with Pool(
+                    processes=n_workers,
+                    initializer=_init_worker,
+                    initargs=(tokenizer_name, self.max_seq_length),
+                ) as pool:
+                    self.examples = pool.map(_worker, self.raw_lines)
+            else:
+                for text in self.raw_lines:
+                    enc = self.tokenizer(
+                        text,
+                        add_special_tokens=False,
+                        return_special_tokens_mask=True,
+                        truncation=True,
+                        max_length=self.max_seq_length,
+                    )
+                    self.examples.append(
+                        {
+                            "input_ids": enc["input_ids"],
+                            "attention_mask": enc["attention_mask"],
+                        }
+                    )
+
         if self.max_train_samples is not None:
             self.examples = self.examples[: self.max_train_samples]
-        
-        del self.raw_lines    
-        
+
+        del self.raw_lines
 
     def __len__(self) -> int:
         return len(self.examples)
@@ -321,12 +381,13 @@ class DropoutTrainer(BaseDebiasTrainer):
             dataloader_num_workers=dataloader_num_workers,
         )
         self.evaluator_func = evaluator_func
-        
+
     def train(
         self,
         *,
         train_file: Union[str, os.PathLike],
-        output_dir: Union[str, os.PathLike] = Path("results/dropout/"),
+        debias_lang: str,
+        output_dir: Union[str, os.PathLike] | None = None,
         num_train_epochs: int = 3,
         per_device_train_batch_size: int = 16,
         learning_rate: float = 5e-5,
@@ -335,10 +396,14 @@ class DropoutTrainer(BaseDebiasTrainer):
         overwrite_output_dir: bool = False,
         max_train_samples: Optional[int] = None,
         early_stopping_patience: int = 2,
+        compute_parallel: bool = False,
         **trainer_kwargs: Any,
     ) -> str:
         tokenizer = self._get_tokenizer()
         config = self._get_model_config(dropout_debias=True)
+
+        if output_dir is None:
+            output_dir = Path(f"results/dropout/{debias_lang}/")
 
         model = AutoModelForMaskedLM.from_pretrained(
             self.model_name_or_path,
@@ -352,6 +417,7 @@ class DropoutTrainer(BaseDebiasTrainer):
             bias_type=None,
             bias_attribute_json=None,
             max_train_samples=max_train_samples,
+            compute_parallel=compute_parallel,
         )
 
         data_collator = DataCollatorForLanguageModeling(
@@ -363,12 +429,11 @@ class DropoutTrainer(BaseDebiasTrainer):
         if overwrite_output_dir and os.path.exists(output_dir):
             shutil.rmtree(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
-        
+
         callbacks = []
         if self.evaluator_func is not None:
             eval_callback = BiasEarlyStoppingCallback(
                 evaluator_func=self.evaluator_func,
-                bias_type=["gender", "race-color", "religion"],
                 target_score=50.0,
                 min_threshold=48.0,
                 patience=early_stopping_patience,
@@ -378,14 +443,13 @@ class DropoutTrainer(BaseDebiasTrainer):
         else:
             evaluation_strategy = "no"
 
-        args = TrainingArguments(
+        args = MyTrainingArguments(
             output_dir=str(output_dir),
             num_train_epochs=num_train_epochs,
             per_device_train_batch_size=per_device_train_batch_size,
             learning_rate=learning_rate,
             logging_steps=logging_steps,
-            eval_steps=1000,
-            save_steps=save_steps,
+            eval_steps=logging_steps,
             seed=self.seed,
             fp16=self.fp16,
             dataloader_num_workers=self.dataloader_num_workers,
@@ -394,6 +458,8 @@ class DropoutTrainer(BaseDebiasTrainer):
             eval_strategy="no",
             save_strategy="steps",
             load_best_model_at_end=False,
+            debias_lang=debias_lang,
+            bias_type=["gender", "race-color", "religion"],
             **trainer_kwargs,
         )
 
@@ -413,7 +479,6 @@ class CDATrainer(BaseDebiasTrainer):
     def __init__(
         self,
         model_name_or_path: str,
-        bias_attribute_json: Union[str, os.PathLike],
         *,
         max_seq_length: int = 128,
         seed: int = 0,
@@ -428,18 +493,16 @@ class CDATrainer(BaseDebiasTrainer):
             fp16=fp16,
             dataloader_num_workers=dataloader_num_workers,
         )
-        self.bias_attribute_json = Path(bias_attribute_json)
-        if not self.bias_attribute_json.is_file():
-            raise FileNotFoundError(
-                f"Bias attribute file not found: {self.bias_attribute_json}"
-            )
+
         self.evaluator_func = evaluator_func
 
     def train(
         self,
         *,
         train_file: Union[str, os.PathLike],
-        output_dir: Union[str, os.PathLike] = Path("results/cda/"),
+        debias_lang: str,
+        bias_attribute_json: Union[str, os.PathLike],
+        output_dir: Union[str, os.PathLike] | None = None,
         bias_type: Literal["gender", "race-color", "religion"],
         num_train_epochs: int = 3,
         per_device_train_batch_size: int = 16,
@@ -449,10 +512,20 @@ class CDATrainer(BaseDebiasTrainer):
         overwrite_output_dir: bool = False,
         max_train_samples: Optional[int] = None,
         early_stopping_patience: int = 2,
+        compute_parallel: bool = False,
         **trainer_kwargs: Any,
     ) -> str:
         tokenizer = self._get_tokenizer()
         config = self._get_model_config(dropout_debias=False)
+
+        self.bias_attribute_json = Path(bias_attribute_json)
+        if not self.bias_attribute_json.is_file():
+            raise FileNotFoundError(
+                f"Bias attribute file not found: {self.bias_attribute_json}"
+            )
+
+        if output_dir is None:
+            output_dir = Path(f"results/cda/{debias_lang}/")
 
         model = AutoModelForMaskedLM.from_pretrained(
             self.model_name_or_path,
@@ -466,6 +539,7 @@ class CDATrainer(BaseDebiasTrainer):
             bias_type=bias_type,
             bias_attribute_json=self.bias_attribute_json,
             max_train_samples=max_train_samples,
+            compute_parallel=compute_parallel,
         )
 
         data_collator = DataCollatorForLanguageModeling(
@@ -477,12 +551,11 @@ class CDATrainer(BaseDebiasTrainer):
         if overwrite_output_dir and os.path.exists(output_dir):
             shutil.rmtree(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
-        
+
         callbacks = []
         if self.evaluator_func is not None:
             eval_callback = BiasEarlyStoppingCallback(
                 evaluator_func=self.evaluator_func,
-                bias_type=bias_type,
                 target_score=50.0,
                 min_threshold=48.0,
                 patience=early_stopping_patience,
@@ -492,14 +565,13 @@ class CDATrainer(BaseDebiasTrainer):
         else:
             evaluation_strategy = "no"
 
-        args = TrainingArguments(
+        args = MyTrainingArguments(
             output_dir=str(output_dir),
             num_train_epochs=num_train_epochs,
             per_device_train_batch_size=per_device_train_batch_size,
             learning_rate=learning_rate,
             logging_steps=logging_steps,
-            eval_steps=1000,
-            save_steps=save_steps,
+            eval_steps=logging_steps,
             seed=self.seed,
             fp16=self.fp16,
             dataloader_num_workers=self.dataloader_num_workers,
@@ -508,6 +580,8 @@ class CDATrainer(BaseDebiasTrainer):
             eval_strategy="no",
             save_strategy="steps",
             load_best_model_at_end=False,
+            debias_lang=debias_lang,
+            bias_type=bias_type,
             **trainer_kwargs,
         )
 
@@ -522,18 +596,21 @@ class CDATrainer(BaseDebiasTrainer):
         trainer.train()
         trainer.save_model()
         return str(output_dir)
-    
+
+@dataclass
+class MyTrainingArguments(TrainingArguments):
+    debias_lang: str = "en_US"
+    bias_type: str = "gender"
+
 class BiasEarlyStoppingCallback(TrainerCallback):
     def __init__(
         self,
         evaluator_func,
-        bias_type,
         target_score=50.0,
         min_threshold=48.0,
         patience=2,
     ):
         self.evaluator = evaluator_func
-        self.bias_type = bias_type
         self.target = target_score
         self.min_threshold = min_threshold
         self.patience = patience
@@ -542,6 +619,8 @@ class BiasEarlyStoppingCallback(TrainerCallback):
         self.last_evaluation_step = 0
         self.steps_since_last_eval = 0
         
+        self.last_bias_score = None
+
     def on_step_end(
         self,
         args: TrainingArguments,
@@ -551,45 +630,30 @@ class BiasEarlyStoppingCallback(TrainerCallback):
     ):
         if state.global_step % args.eval_steps != 0:
             return
-        
+
         current_model = kwargs.get("model")
         if current_model is None:
             return
-        
+
         was_training = current_model.training
         current_model.eval()
-    
+
         try:
             with torch.no_grad():
-                score = self.evaluator(current_model, self.bias_type)
+                score = self.evaluator(current_model, args.bias_type, args.debias_lang)
         except Exception as e:
             print(f"Error while evaluating: {e}")
             return
         finally:
             if was_training:
                 current_model.train()
-        
+
         print(f"Step {state.global_step}: BiasScore = {score:.2f}%")
-        
-        if score < self.min_threshold:
-            print(f"Overcompensation! Score below {self.min_threshold}%, stopping training...")
-            control.should_training_stop = True
-            return
-        
+
         distance = abs(score - self.target)
         
-        if self.best_score is None or distance < self.best_score["distance"]:
-            self.best_score = {"epoch": state.epoch, "score": score, "distance": distance}
-            self.wait = 0
-        else:
-            self.wait += 1
-            if self.wait >= self.patience:
-                print(f"Patience limit reached ({self.wait}), stopping training...")
-                control.should_training_stop = True
-                return
-            
-        self.last_evaluation_step = state.global_step
-        
+        self.last_bias_score = {"bias_score": score, "new_best": False}
+
         if self.best_score is None or distance < self.best_score["distance"]:
             self.best_score = {
                 "epoch": state.epoch,
@@ -597,23 +661,32 @@ class BiasEarlyStoppingCallback(TrainerCallback):
                 "score": score,
                 "distance": distance,
             }
-            
+
             best_model_dir = os.path.join(args.output_dir, "best_model")
-            
+
             if os.path.exists(best_model_dir):
                 shutil.rmtree(best_model_dir)
-                
+
             os.makedirs(best_model_dir, exist_ok=True)
-            
+
             current_model.save_pretrained(best_model_dir)
-            
+
             if hasattr(self, "tokenizer") and self.tokenizer is not None:
                 self.tokenizer.save_pretrained(best_model_dir)
-                
+
             self.wait = 0
-            
+            self.last_bias_score["new_best"] = True
+
             print(f"New best model: step={state.global_step}, score={score:.2f}%")
-                
+        else:
+            self.wait += 1
+            if self.wait >= self.patience:
+                print(f"Patience limit reached ({self.wait}), stopping training...")
+                control.should_training_stop = True
+                return
+
+        self.last_evaluation_step = state.global_step
+
     def on_train_end(
         self,
         args: TrainingArguments,
@@ -624,3 +697,19 @@ class BiasEarlyStoppingCallback(TrainerCallback):
         if self.best_score:
             print(f"Best result: Step {self.best_score['step']} with Score {self.best_score['score']:.2f}%")
             print(f"Best model: {os.path.join(args.output_dir, 'best_model')}")
+            
+    def on_log(
+        self,
+        args,
+        state,
+        control,
+        logs = None,
+        **kwargs,
+    ):
+        if logs is None:
+            logs = {}
+            
+        if self.last_bias_score is not None:
+            logs["bias_score"] = self.last_bias_score["bias_score"]
+            log["new_best"] = self.last_bias_score["new_best"]
+            self.last_bias_score = None
