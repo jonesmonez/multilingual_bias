@@ -350,50 +350,42 @@
   "race-color": [
     [
       "nero",
-      "bianco"
+      "bianco",
+      "asiatico"
     ],
     [
       "nera",
-      "bianca"
+      "bianca",
+      "asiatica"
     ],
     [
       "neri",
-      "bianchi"
+      "bianchi",
+      "asiatici"
     ],
     [
       "nere",
-      "bianche"
+      "bianche",
+      "asiatiche"
     ],
     [
       "africano",
+      "europeo",
       "asiatico"
     ],
     [
       "africana",
+      "europea",
       "asiatica"
     ],
     [
       "africani",
+      "europei",
       "asiatici"
     ],
     [
       "africane",
-      "asiatiche"
-    ],
-    [
-      "nero",
-      "asiatico"
-    ],
-    [
-      "nera",
-      "asiatica"
-    ],
-    [
-      "neri",
-      "asiatici"
-    ],
-    [
-      "nere",
+      "europee",
       "asiatiche"
     ]
   ]
