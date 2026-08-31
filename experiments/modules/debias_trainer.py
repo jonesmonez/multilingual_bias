@@ -409,6 +409,9 @@ class DropoutTrainer(BaseDebiasTrainer):
             self.model_name_or_path,
             config=config,
         )
+        
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        model = model.to(device)
 
         train_dataset = CDADataset(
             raw_text_path=train_file,
@@ -460,6 +463,7 @@ class DropoutTrainer(BaseDebiasTrainer):
             load_best_model_at_end=False,
             debias_lang=debias_lang,
             bias_type=["gender", "race-color", "religion"],
+            save_steps=save_steps,
             **trainer_kwargs,
         )
 
@@ -531,6 +535,9 @@ class CDATrainer(BaseDebiasTrainer):
             self.model_name_or_path,
             config=config,
         )
+        
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        model = model.to(device)
 
         train_dataset = CDADataset(
             raw_text_path=train_file,
@@ -582,6 +589,7 @@ class CDATrainer(BaseDebiasTrainer):
             load_best_model_at_end=False,
             debias_lang=debias_lang,
             bias_type=bias_type,
+            save_steps=save_steps,
             **trainer_kwargs,
         )
 
@@ -698,18 +706,18 @@ class BiasEarlyStoppingCallback(TrainerCallback):
             print(f"Best result: Step {self.best_score['step']} with Score {self.best_score['score']:.2f}%")
             print(f"Best model: {os.path.join(args.output_dir, 'best_model')}")
             
-    def on_log(
-        self,
-        args,
-        state,
-        control,
-        logs = None,
-        **kwargs,
-    ):
-        if logs is None:
-            logs = {}
+    # def on_log(
+    #     self,
+    #     args,
+    #     state,
+    #     control,
+    #     logs = None,
+    #     **kwargs,
+    # ):
+    #     if logs is None:
+    #         logs = {}
             
-        if self.last_bias_score is not None:
-            logs["bias_score"] = self.last_bias_score["bias_score"]
-            log["new_best"] = self.last_bias_score["new_best"]
-            self.last_bias_score = None
+    #     if self.last_bias_score is not None:
+    #         logs["bias_score"] = self.last_bias_score["bias_score"]
+    #         log["new_best"] = self.last_bias_score["new_best"]
+    #         self.last_bias_score = None
