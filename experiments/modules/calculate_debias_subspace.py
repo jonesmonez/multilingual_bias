@@ -3,6 +3,7 @@ import json
 import nltk
 import torch
 import transformers
+from zh_sentence.tokenizer import tokenize
 transformers.logging.set_verbosity_error()
 import numpy as np
 from pathlib import Path
@@ -14,9 +15,6 @@ from sklearn.decomposition import PCA
 
 from bias_bench.model import models
 from experiments.modules.experiment_name import filename
-
-import multiprocessing as mp
-from concurrent.futures import ProcessPoolExecutor
 import itertools
 import jieba
 
@@ -30,16 +28,15 @@ def _tokenize_paragraph(paragraph: str, lang: str):
         "it_IT": "italian",
     }
     if lang == "zh_CN":
-        return [
-            sentence.lower()
-            for sentence in jieba.cut_sent(paragraph)
-        ]
+        sentence_list = tokenize(paragraph)
+        return sentence_list
     else:
         nltk_lang = lang_map.get(lang, "english")
     return [
         sentence.lower()
         for sentence in nltk.sent_tokenize(paragraph, nltk_lang)
     ]
+
 
 class SubspaceCalculator:
     def __init__(

@@ -9,6 +9,7 @@ import sklearn
 import itertools
 import numpy as np
 import transformers
+from zh_sentence.tokenizer import tokenize
 transformers.logging.set_verbosity_error()
 from pathlib import Path
 from functools import partial
@@ -37,10 +38,8 @@ def _tokenize_paragraph(paragraph: str, lang: str):
         "it_IT": "italian",
     }
     if lang == "zh_CN":
-        return [
-            sentence.lower()
-            for sentence in jieba.cut_sent(paragraph)
-        ]
+        sentence_list = tokenize(paragraph)
+        return sentence_list
     else:
         nltk_lang = lang_map.get(lang, "english")
     return [
