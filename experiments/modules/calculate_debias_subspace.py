@@ -85,7 +85,7 @@ class SubspaceCalculator:
         )
         self.data.load_examples(n_max_sent)
         
-    def compute_gender_subspace(self):
+    def _compute_gender_subspace(self):
         try:
             self.data
         except NameError:
@@ -181,13 +181,13 @@ class SentenceDebiasWrapper(SubspaceCalculator):
             verbose,
         )
         
-    def compute_gender_subspace(self):
+    def _compute_gender_subspace(self):
         """Returns race subspace components for SentenceDebias.
 
         Implementation based upon: https://github.com/pliang279/sent_debias.
         """
                 
-        super().compute_gender_subspace()
+        super()._compute_gender_subspace()
 
         means = (self.all_embeddings_male + self.all_embeddings_female) / 2.0
         
@@ -210,7 +210,7 @@ class SentenceDebiasWrapper(SubspaceCalculator):
 
         return bias_direction
 
-    def compute_racecolor_subspace(self):
+    def _compute_racecolor_subspace(self):
         """Returns race subspace components for SentenceDebias.
 
         Implementation based upon: https://github.com/pliang279/sent_debias.
@@ -317,7 +317,7 @@ class SentenceDebiasWrapper(SubspaceCalculator):
 
         return bias_direction
 
-    def compute_religion_subspace(self):
+    def _compute_religion_subspace(self):
         """Returns religion subspace components for SentenceDebias.
 
         Implementation based upon: https://github.com/pliang279/sent_debias.
@@ -425,6 +425,16 @@ class SentenceDebiasWrapper(SubspaceCalculator):
             self.save_output(bias_direction, "sent", "religion")
 
         return bias_direction
+    
+    def compute(self, btype):
+        if btype == "gender":
+            self._compute_gender_subspace()
+        elif btype == "race-color":
+            self._compute_racecolor_subspace()
+        elif btype == "religion":
+            self._compute_religion_subspace()
+        else:
+            print("No valid bias_type")
 
 class DensrayDebiasWrapper(SubspaceCalculator):
     def __init__(
@@ -445,9 +455,9 @@ class DensrayDebiasWrapper(SubspaceCalculator):
             verbose,
         )
 
-    def compute_gender_subspace(self):
+    def _compute_gender_subspace(self):
             
-        super().compute_gender_subspace()
+        super()._compute_gender_subspace()
         
         if self.all_embeddings_male is None or self.all_embeddings_female is None:
             print("Warning: No embeddings found for DensRay gender subspace. Skipping.")
@@ -467,6 +477,12 @@ class DensrayDebiasWrapper(SubspaceCalculator):
             self.save_output(result, "densray", "gender")
             
         return result
+    
+    def compute(self, btype):
+        if btype == "gender":
+            self._compute_gender_subspace()
+        else:
+            print("No valid bias_type")
 
     class DensRay:
         def __init__(self, Lemb, Remb):

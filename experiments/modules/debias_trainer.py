@@ -529,7 +529,7 @@ class CDATrainer(BaseDebiasTrainer):
             )
 
         if output_dir is None:
-            output_dir = Path(f"results/cda/{debias_lang}/")
+            output_dir = Path(f"results/cda/{debias_lang}/{bias_type}")
 
         model = AutoModelForMaskedLM.from_pretrained(
             self.model_name_or_path,
@@ -656,7 +656,7 @@ class BiasEarlyStoppingCallback(TrainerCallback):
             if was_training:
                 current_model.train()
 
-        print(f"Step {state.global_step}: BiasScore = {score:.2f}%")
+        # print(f"Step {state.global_step}: BiasScore = {score:.2f}%")
 
         distance = abs(score - self.target)
         
@@ -694,6 +694,9 @@ class BiasEarlyStoppingCallback(TrainerCallback):
                 return
 
         self.last_evaluation_step = state.global_step
+        
+        if score == 50.00:
+            control.should_training_stop = True
 
     def on_train_end(
         self,
