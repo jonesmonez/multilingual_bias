@@ -1,6 +1,8 @@
 import os
 os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
+import re
 import json
+import jieba
 import shutil
 import random
 from pathlib import Path
@@ -53,8 +55,8 @@ def _worker(text: str) -> Dict[str, Any]:
 def _build_gender_mapping(attr_pairs):
     mapping = {}
     for male, female in attr_pairs:
-        mapping[male] = female
-        mapping[female] = male
+        mapping[male.casefold()] = female
+        mapping[female.casefold()] = male
     return mapping
 
 
@@ -62,9 +64,9 @@ def _build_ternary_mapping(attr_pairs):
     mapping = {}
     for triple in attr_pairs:
         w0, w1, w2 = triple
-        mapping[w0] = [w1, w2]
-        mapping[w1] = [w0, w2]
-        mapping[w2] = [w0, w1]
+        mapping[w0.casefold()] = [w1, w2]
+        mapping[w1.casefold()] = [w0, w2]
+        mapping[w2.casefold()] = [w0, w1]
     return mapping
 
 def _process_one_sentence(
@@ -73,37 +75,37 @@ def _process_one_sentence(
     max_seq_length: int,
     bias_type: Optional[str],
     word_mapping: Optional[Dict],
+    debias_lang: str,
+    attribute_words_flat: Optional[List[str]],
 ) -> List[Dict[str, Any]]:
-    tokenized = tokenizer(
-        text,
+    if bias_type == "gender":
+        outputs = gender_counterfactual_augmentation_text(
+            text, word_mapping, debias_lang, attribute_words_flat
+        )
+    elif bias_type in ("race-color", "religion"):
+        outputs = ternary_counterfactual_augmentation_text(
+            text, word_mapping, debias_lang, attribute_words_flat
+        )
+    else:
+        outputs = [text]
+        
+    if not outputs:
+        return []
+    
+    tok = tokenizer(
+        outputs,
         add_special_tokens=False,
         return_special_tokens_mask=True,
         truncation=True,
         max_length=max_seq_length,
     )
-    example_batch = {"input_ids": [tokenized["input_ids"]]}
-
-    if bias_type == "gender":
-        aug_result = gender_counterfactual_augmentation(
-            example_batch, word_mapping, tokenizer, max_seq_length
-        )
-    elif bias_type in ("race-color", "religion"):
-        aug_result = ternary_counterfactual_augmentation(
-            example_batch, word_mapping, tokenizer, max_seq_length
-        )
-    else:
-        aug_result = {
-            "input_ids": [tokenized["input_ids"]],
-            "attention_mask": [tokenized["attention_mask"]],
-            "return_special_tokens_mask": [tokenized["return_special_tokens_mask"]],
-        }
 
     out: List[Dict[str, Any]] = []
-    for i in range(len(aug_result["input_ids"])):
+    for i in range(len(tok["input_ids"])):
         out.append(
             {
-                "input_ids": aug_result["input_ids"][i],
-                "attention_mask": aug_result["attention_mask"][i],
+                "input_ids": tok["input_ids"][i],
+                "attention_mask": tok["attention_mask"][i],
             }
         )
     return out
@@ -139,59 +141,64 @@ def _create_bias_attribute_words(attribute_file, bias_type):
             result.append(augmented_words)
     return result
 
-def gender_counterfactual_augmentation(examples, word_mapping, tokenizer, max_seq_length):
-    outputs = []
-    for input_ids in examples["input_ids"]:
-        sentence = tokenizer.decode(input_ids)
-        words = sentence.split()
-        augmented = False
-        new_words = words[:]
-        for i, w in enumerate(words):
-            if w in word_mapping:
-                augmented = True
-                new_words[i] = word_mapping[w]
-        if augmented:
-            augmented_sentence = " ".join(new_words)
-            outputs.append(augmented_sentence)
-            outputs.append(sentence)
+def chinese_bias_aware_tokenize(sentence, attributes):
+    for attribute in sorted(set(attributes or []), key=len, reverse=True):
+        jieba.add_word(attribute, freq=10**8)
+    return list(jieba.cut(sentence, cut_all=False))
 
-    if not outputs:
-        return {"input_ids": [], "attention_mask": [], "return_special_tokens_mask": []}
+def tokenize_for_bias(sentence, language, attributes=None):
+    if language == "zh_CN":
+        return chinese_bias_aware_tokenize(sentence, attributes)
+    if language == "ca_ES":
+        return re.findall(r"[\w·]+|[^\w\s·]", sentence, re.UNICODE)
+    return re.findall(r"\w+|[^\w\s]", sentence, re.UNICODE)
 
-    return tokenizer(
-        outputs,
-        return_special_tokens_mask=True,
-        add_special_tokens=False,
-        truncation=True,
-        max_length=max_seq_length,
-    )
+def _replace_word_preserve_case(word_to_replace, new_word, text):
+    pattern = re.compile(rf"\b{re.escape(word_to_replace)}\b", re.IGNORECASE)
 
-def ternary_counterfactual_augmentation(examples, word_mapping, tokenizer, max_seq_length):
-    outputs = []
-    for input_ids in examples["input_ids"]:
-        sentence = tokenizer.decode(input_ids)
-        words = sentence.split()
-        augmented = False
-        new_words = words[:]
-        for i, w in enumerate(words):
-            if w in word_mapping:
-                augmented = True
-                new_words[i] = random.choice(word_mapping[w])
-        if augmented:
-            augmented_sentence = " ".join(new_words)
-            outputs.append(augmented_sentence)
-            outputs.append(sentence)
+    def replace(match):
+        original = match.group(0)
+        if original.isupper():
+            return new_word.upper()
+        if original and original[0].isupper():
+            return new_word[0].upper() + new_word[1:]
+        return new_word
 
-    if not outputs:
-        return {"input_ids": [], "attention_mask": [], "return_special_tokens_mask": []}
+    return pattern.sub(replace, text)
 
-    return tokenizer(
-        outputs,
-        return_special_tokens_mask=True,
-        add_special_tokens=False,
-        truncation=True,
-        max_length=max_seq_length,
-    )
+def gender_counterfactual_augmentation_text(text, word_mapping, debias_lang, attribute_words_flat):
+    tokens = tokenize_for_bias(text, debias_lang, attribute_words_flat)
+    tokens_normalized = [t.casefold() for t in tokens]
+    
+    for tok, tok_norm in zip(tokens, tokens_normalized):
+        if tok_norm in word_mapping:
+            swapped = word_mapping[tok_norm]
+            
+            if debias_lang == "zh_CN":
+                replaced_tokens = [swapped if t == tok else t for t in tokens]
+                augmented_sentence = "".join(replaced_tokens)
+            else:
+                augmented_sentence = _replace_word_preserve_case(tok, swapped, text)
+                
+            return [augmented_sentence, text]
+    return []
+    
+def ternary_counterfactual_augmentation_text(text, word_mapping, debias_lang, attribute_words_flat):
+    tokens = tokenize_for_bias(text, debias_lang, attribute_words_flat)
+    tokens_normalized = [t.casefold() for t in tokens]
+    
+    for tok, tok_norm in zip(tokens, tokens_normalized):
+        if tok_norm in word_mapping:
+            swapped = random.choice(word_mapping[tok_norm])
+            
+            if debias_lang == "zh_CN":
+                replaced_tokens = [swapped if t == tok else t for t in tokens]
+                augmented_sentence = "".join(replaced_tokens)
+            else:
+                augmented_sentence = _replace_word_preserve_case(tok, swapped, text)
+            
+            return [augmented_sentence, text]
+    return []
 
 class CDADataset(Dataset):
     def __init__(
@@ -199,6 +206,7 @@ class CDADataset(Dataset):
         raw_text_path: Union[str, os.PathLike],
         tokenizer: Any,
         max_seq_length: int,
+        debias_lang: str,
         bias_type: Optional[str] = None,
         bias_attribute_json: Union[str, os.PathLike] = None,
         mlm_probability: float = 0.15,
@@ -208,6 +216,7 @@ class CDADataset(Dataset):
     ):
         self.tokenizer = tokenizer
         self.max_seq_length = max_seq_length
+        self.debias_lang = debias_lang
         self.mlm_probability = mlm_probability
         self.max_train_samples = max_train_samples
 
@@ -226,6 +235,7 @@ class CDADataset(Dataset):
                 self.word_mapping = _build_gender_mapping(self.attr_pairs)
             else:
                 self.word_mapping = _build_ternary_mapping(self.attr_pairs)
+            self.attribute_words_flat = [w for group in self.attr_pairs for w in group]
             self.examples = []
 
             if compute_parallel:
@@ -238,6 +248,8 @@ class CDADataset(Dataset):
                         self.max_seq_length,
                         self.bias_type,
                         self.word_mapping,
+                        self.debias_lang,
+                        self.attribute_words_flat,
                     )
                     for text in self.raw_lines
                 ]
@@ -249,29 +261,24 @@ class CDADataset(Dataset):
                     self.examples.extend(examples)
             else:
                 for text in self.raw_lines:
-                    tokenized = self.tokenizer(
-                        text,
-                        add_special_tokens=False,
-                        return_special_tokens_mask=True,
-                        truncation=True,
-                        max_length=self.max_seq_length,
-                    )
-                    examples_batch = {"input_ids": [tokenized["input_ids"]]}
                     if bias_type == "gender":
-                        aug_result = gender_counterfactual_augmentation(
-                            examples_batch, self.word_mapping, self.tokenizer, self.max_seq_length
-                        )
+                        outputs = gender_counterfactual_augmentation_text(text, self.word_mapping, self.debias_lang, self.attribute_words_flat)
                     else:
-                        aug_result = ternary_counterfactual_augmentation(
-                            examples_batch, self.word_mapping, self.tokenizer, self.max_seq_length
+                        outputs = ternary_counterfactual_augmentation_text(text, self.word_mapping, self.debias_lang, self.attribute_words_flat)
+                        
+                    if len(outputs) > 0:
+                        tok = self.tokenizer(
+                            outputs,
+                            add_special_tokens=False,
+                            return_special_tokens_mask=True,
+                            truncation=True,
+                            max_length=self.max_seq_length,
                         )
-
-                    if len(aug_result["input_ids"]) > 0:
-                        for i in range(len(aug_result["input_ids"])):
+                        for i in range(len(tok["input_ids"])):
                             self.examples.append(
                                 {
-                                    "input_ids": aug_result["input_ids"][i],
-                                    "attention_mask": aug_result["attention_mask"][i],
+                                    "input_ids": tok["input_ids"][i],
+                                    "attention_mask": tok["attention_mask"][i],
                                 }
                             )
         else:
@@ -421,6 +428,7 @@ class DropoutTrainer(BaseDebiasTrainer):
             bias_attribute_json=None,
             max_train_samples=max_train_samples,
             compute_parallel=compute_parallel,
+            debias_lang=debias_lang,
         )
 
         data_collator = DataCollatorForLanguageModeling(
@@ -547,6 +555,7 @@ class CDATrainer(BaseDebiasTrainer):
             bias_attribute_json=self.bias_attribute_json,
             max_train_samples=max_train_samples,
             compute_parallel=compute_parallel,
+            debias_lang=debias_lang,
         )
 
         data_collator = DataCollatorForLanguageModeling(

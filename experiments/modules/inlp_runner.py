@@ -1,5 +1,6 @@
 import os
 os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
+import re
 import json
 import nltk
 import torch
@@ -33,6 +34,7 @@ def _tokenize_paragraph(paragraph: str, lang: str):
         "en_US": "english",
         "de_DE": "german",
         "es_AR": "spanish",
+        "ca_ES": "spanish",
         "es_ES": "spanish",
         "fr_FR": "french",
         "it_IT": "italian",
@@ -68,7 +70,9 @@ def _encode_sentence_batched(
     batch_size: int = 32,
     max_length: int = 128,
     show_progress: bool = True,
+    sent_type: str = "",
 ):
+    sent_type = sent_type + " " if sent_type != "" else ""
     model.to(device)
     model.eval()
     all_vecs = []
@@ -76,8 +80,8 @@ def _encode_sentence_batched(
     batch_iter = (
         tqdm(
             range(0, len(sentences), batch_size),
-            desc="Encoding sentences (batched)",
-            leave=False,
+            desc=f"Encoding {sent_type}sentences (batched)",
+            leave=True,
             disable=not show_progress,
         )
         if show_progress
@@ -116,7 +120,25 @@ def chinese_bias_aware_tokenize(sentence, attributes):
 def tokenize_for_bias(sentence, language, attributes=None):
     if language == "zh_CN":
         return chinese_bias_aware_tokenize(sentence, attributes)
-    return sentence.split(" ")
+    
+    if language == "ca_ES":
+        return re.findall(r"[\w·]+|[^\w\s·]", sentence, re.UNICODE)
+    
+    return re.findall(r"\w+|[^\w\s]", sentence, re.UNICODE)
+
+def _clip_at_token_index(original_sentence: str, token_index: int, tokens: list):
+    current_pos = 0
+    target_end = len(original_sentence)
+    
+    for i, token in enumerate(tokens[:token_index]):
+        found_pos = original_sentence.find(token, current_pos)
+        if found_pos == -1:
+            return original_sentence
+        current_pos = found_pos + len(token)
+        if i == token_index - 1:
+            target_end = current_pos
+    
+    return original_sentence[:target_end].strip()
 
 class InlpRunner:
     def __init__(
@@ -222,7 +244,7 @@ class InlpRunner:
                     index = len(tokens)
                 else:
                     index = random.randint(4, len(tokens))
-                neutral_sentences_clipped.append(" ".join(tokens[:index]))
+                neutral_sentences_clipped.append(_clip_at_token_index(sentence, index, tokens))
                 count_neutral += 1
                 continue
             
@@ -231,7 +253,8 @@ class InlpRunner:
                     male_sentences.append(sentence)
                     idx = next(i for i, t in enumerate(tokens) if t in male_biased_token_set)
                     index = random.randint(idx, len(tokens))
-                    male_sentences_clipped.append(" ".join(tokens[: index + 1]))
+                    clipped_sentence = _clip_at_token_index(sentence, index + 1, tokens)
+                    male_sentences_clipped.append(clipped_sentence)
                     count_male += 1
                     
             if female_flag and count_female < n_sentences:
@@ -239,7 +262,8 @@ class InlpRunner:
                     female_sentences.append(sentence)
                     idx = next(i for i, t in enumerate(tokens) if t in female_biased_token_set)
                     index = random.randint(idx, len(tokens))
-                    female_sentences_clipped.append(" ".join(tokens[: index + 1]))
+                    clipped_sentence = _clip_at_token_index(sentence, index + 1, tokens)
+                    female_sentences_clipped.append(clipped_sentence)
                     count_female += 1
                 
             if (count_male == count_female == count_neutral == n_sentences):
@@ -299,7 +323,7 @@ class InlpRunner:
                     index = len(tokens)
                 else:
                     index = random.randint(4, len(tokens))
-                neutral_sentences_clipped.append(" ".join(tokens[:index]))
+                neutral_sentences_clipped.append(_clip_at_token_index(sentence, index, tokens))
                 count_neutral += 1
                 continue
             
@@ -308,7 +332,7 @@ class InlpRunner:
                     race_sentences.append(sentence)
                     idx = next(i for i, t in enumerate(tokens) if t in race_biased_token_set)
                     index = random.randint(idx, len(tokens))
-                    race_sentences_clipped.append(" ".join(tokens[: index + 1]))
+                    race_sentences_clipped.append(_clip_at_token_index(sentence, index + 1, tokens))
                     count_race += 1
                     
             if count_race == count_neutral == n_sentences:
@@ -363,7 +387,7 @@ class InlpRunner:
                     index = len(tokens)
                 else:
                     index = random.randint(4, len(tokens))
-                neutral_sentences_clipped.append(" ".join(tokens[:index]))
+                neutral_sentences_clipped.append(_clip_at_token_index(sentence, index, tokens))
                 count_neutral += 1
                 continue
 
@@ -372,7 +396,7 @@ class InlpRunner:
                     religion_sentences.append(sentence)
                     idx = next(i for i, t in enumerate(tokens) if t in religion_biased_token_set)
                     index = random.randint(idx, len(tokens))
-                    religion_sentences_clipped.append(" ".join(tokens[: index + 1]))
+                    religion_sentences_clipped.append(_clip_at_token_index(sentence, index + 1, tokens))
                     count_religion += 1
 
             if count_religion == count_neutral == n_sentences:
@@ -401,6 +425,7 @@ class InlpRunner:
                 device,
                 batch_size=self.batch_size,
                 show_progress=True,
+                sent_type = "male",
             )
             female_features = _encode_sentence_batched(
                 female_sentences,
@@ -409,6 +434,7 @@ class InlpRunner:
                 device,
                 batch_size=self.batch_size,
                 show_progress=True,
+                sent_type = "female",
             )
             neutral_features = _encode_sentence_batched(
                 neutral_sentences,
@@ -417,6 +443,7 @@ class InlpRunner:
                 device,
                 batch_size=self.batch_size,
                 show_progress=True,
+                sent_type = "neutral",
             )
             return male_features, female_features, neutral_features
         else:
@@ -428,7 +455,7 @@ class InlpRunner:
             neutral_features = []
 
             with torch.no_grad():
-                for sentence in tqdm(male_sentences, desc="Encoding male sentences", leave=False):
+                for sentence in tqdm(male_sentences, desc="Encoding male sentences", leave=True):
                     input_ids = tokenizer(
                         sentence, add_special_tokens=True, truncation=True, return_tensors="pt"
                     ).to(device)
@@ -437,7 +464,7 @@ class InlpRunner:
                     outputs = torch.mean(outputs, dim=1).squeeze().detach().cpu().numpy()
                     male_features.append(outputs)
 
-                for sentence in tqdm(female_sentences, desc="Encoding female sentences", leave=False):
+                for sentence in tqdm(female_sentences, desc="Encoding female sentences", leave=True):
                     input_ids = tokenizer(
                         sentence, add_special_tokens=True, truncation=True, return_tensors="pt"
                     ).to(device)
@@ -446,7 +473,7 @@ class InlpRunner:
                     outputs = torch.mean(outputs, dim=1).squeeze().detach().cpu().numpy()
                     female_features.append(outputs)
 
-                for sentence in tqdm(neutral_sentences, desc="Encoding neutral sentences", leave=False):
+                for sentence in tqdm(neutral_sentences, desc="Encoding neutral sentences", leave=True):
                     input_ids = tokenizer(
                         sentence, add_special_tokens=True, truncation=True, return_tensors="pt"
                     ).to(device)
@@ -466,6 +493,7 @@ class InlpRunner:
                 device,
                 batch_size=self.batch_size,
                 show_progress=True,
+                sent_type = "bias",
             )
             neutral_features = _encode_sentence_batched(
                 neutral_sentences,
@@ -474,6 +502,7 @@ class InlpRunner:
                 device,
                 batch_size=self.batch_size,
                 show_progress=True,
+                sent_type = "neutral",
             )
             return bias_features, neutral_features
         else:
@@ -484,7 +513,7 @@ class InlpRunner:
             neutral_features = []
 
             with torch.no_grad():
-                for sentence in tqdm(bias_sentences, desc="Encoding bias sentences", leave=False):
+                for sentence in tqdm(bias_sentences, desc="Encoding bias sentences", leave=True):
                     input_ids = tokenizer(
                         sentence, add_special_tokens=True, truncation=True, return_tensors="pt"
                     ).to(device)
@@ -493,7 +522,7 @@ class InlpRunner:
                     outputs = torch.mean(outputs, dim=1).squeeze().detach().cpu().numpy()
                     bias_features.append(outputs)
 
-                for sentence in tqdm(neutral_sentences, desc="Encoding neutral sentences", leave=False):
+                for sentence in tqdm(neutral_sentences, desc="Encoding neutral sentences", leave=True):
                     input_ids = tokenizer(
                         sentence, add_special_tokens=True, truncation=True, return_tensors="pt"
                     ).to(device)

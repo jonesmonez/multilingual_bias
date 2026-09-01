@@ -23,6 +23,7 @@ def _tokenize_paragraph(paragraph: str, lang: str):
         "en_US": "english",
         "de_DE": "german",
         "es_AR": "spanish",
+        "ca_ES": "spanish",
         "es_ES": "spanish",
         "fr_FR": "french",
         "it_IT": "italian",
@@ -578,19 +579,37 @@ class DensrayDebiasWrapper(SubspaceCalculator):
             self.std = first_dim.var().sqrt()
 
 class _SentenceDebiasDataset:
-    def _gender_augment_func(self, text, examples, attribute_words):
-        words = text.split(" ")
+    def chinese_bias_aware_tokenize(self, sentence, attributes):
+        for attribute in sorted(set(attributes), key=len, reverse=True):
+            jieba.add_word(attribute, freq=10**8)
 
-        for i, (female_word, male_word) in enumerate(attribute_words):
-            if female_word in words:
+        return list(jieba.cut(sentence, cut_all=False))
+
+    def tokenize_for_bias(self, sentence, language, attributes=None):
+        if language == "zh_CN":
+            return self.chinese_bias_aware_tokenize(sentence, attributes)
+        
+        if language == "ca_ES":
+            return re.findall(r"[\w·]+|[^\w\s·]", sentence, re.UNICODE)
+        
+        return re.findall(r"\w+|[^\w\s]", sentence, re.UNICODE)
+    
+    def _gender_augment_func(self, text, examples, attribute_words, attribute_words_flat):
+        # words = text.split(" ")
+        words = self.tokenize_for_bias(text, self._lang_debias, attribute_words_flat)
+
+        words_normalized = [word.casefold() for word in words]
+
+        for female_word, male_word in attribute_words:
+            if female_word.casefold() in words_normalized:
                 female_example = text
-                male_example = self._replace_word_in_text(female_word, male_word, words)
+                male_example = self._replace_word_in_text(female_word, male_word, text)
                 examples.append(
                     {"female_example": female_example, "male_example": male_example}
                 )
 
-            if male_word in words:
-                female_example = self._replace_word_in_text(male_word, female_word, words)
+            if male_word.casefold() in words_normalized:
+                female_example = self._replace_word_in_text(male_word, female_word, text)
                 male_example = text
                 examples.append(
                     {"female_example": female_example, "male_example": male_example}
@@ -598,13 +617,16 @@ class _SentenceDebiasDataset:
 
         return examples
 
-    def _racecolor_augment_func(self, text, examples, attribute_words):
-        words = text.split(" ")
+    def _racecolor_augment_func(self, text, examples, attribute_words, attribute_words_flat):
+        # words = text.split(" ")
+        words = self.tokenize_for_bias(text, self._lang_debias, attribute_words_flat)
 
-        for i, (r1_word, r2_word, r3_word) in enumerate(attribute_words):
-            if r1_word in words:
+        words_normalized = [word.casefold() for word in words]
+
+        for r1_word, r2_word, r3_word in attribute_words:
+            if r1_word.casefold() in words_normalized:
                 r1_example = text
-                r2_example = self._replace_word_in_text(r1_word, r2_word, words)
+                r2_example = self._replace_word_in_text(r1_word, r2_word, text)
                 r3_example = self._replace_word_in_text(r1_word, r3_word, words)
 
                 examples.append(
@@ -615,10 +637,10 @@ class _SentenceDebiasDataset:
                     }
                 )
 
-            if r2_word in words:
-                r1_example = self._replace_word_in_text(r2_word, r1_word, words)
+            if r2_word.casefold() in words_normalized:
+                r1_example = self._replace_word_in_text(r2_word, r1_word, text)
                 r2_example = text
-                r3_example = self._replace_word_in_text(r2_word, r3_word, words)
+                r3_example = self._replace_word_in_text(r2_word, r3_word, text)
 
                 examples.append(
                     {
@@ -629,8 +651,8 @@ class _SentenceDebiasDataset:
                 )
 
             if r3_word in words:
-                r1_example = self._replace_word_in_text(r3_word, r1_word, words)
-                r2_example = self._replace_word_in_text(r3_word, r2_word, words)
+                r1_example = self._replace_word_in_text(r3_word, r1_word, text)
+                r2_example = self._replace_word_in_text(r3_word, r2_word, text)
                 r3_example = text
 
                 examples.append(
@@ -643,14 +665,17 @@ class _SentenceDebiasDataset:
 
         return examples
 
-    def _religion_augment_func(self, text, examples, attribute_words):
-        words = text.split(" ")
+    def _religion_augment_func(self, text, examples, attribute_words, attribute_words_flat):
+        # words = text.split(" ")
+        words = self.tokenize_for_bias(text, self._lang_debias, attribute_words_flat)
 
-        for i, (r1_word, r2_word, r3_word) in enumerate(attribute_words):
-            if r1_word in words:
+        words_normalized = [word.casefold() for word in words]
+
+        for r1_word, r2_word, r3_word in attribute_words:
+            if r1_word.casefold() in words_normalized:
                 r1_example = text
-                r2_example = self._replace_word_in_text(r1_word, r2_word, words)
-                r3_example = self._replace_word_in_text(r1_word, r3_word, words)
+                r2_example = self._replace_word_in_text(r1_word, r2_word, text)
+                r3_example = self._replace_word_in_text(r1_word, r3_word, text)
 
                 examples.append(
                     {
@@ -660,10 +685,10 @@ class _SentenceDebiasDataset:
                     }
                 )
 
-            if r2_word in words:
-                r1_example = self._replace_word_in_text(r2_word, r1_word, words)
+            if r2_word.casefold() in words_normalized:
+                r1_example = self._replace_word_in_text(r2_word, r1_word, text)
                 r2_example = text
-                r3_example = self._replace_word_in_text(r2_word, r3_word, words)
+                r3_example = self._replace_word_in_text(r2_word, r3_word, text)
 
                 examples.append(
                     {
@@ -673,9 +698,9 @@ class _SentenceDebiasDataset:
                     }
                 )
 
-            if r3_word in words:
-                r1_example = self._replace_word_in_text(r3_word, r1_word, words)
-                r2_example = self._replace_word_in_text(r3_word, r2_word, words)
+            if r3_word.casefold() in words_normalized:
+                r1_example = self._replace_word_in_text(r3_word, r1_word, text)
+                r2_example = self._replace_word_in_text(r3_word, r2_word, text)
                 r3_example = text
 
                 examples.append(
@@ -688,8 +713,25 @@ class _SentenceDebiasDataset:
 
         return examples
 
-    def _replace_word_in_text(self, word_to_replace, new_word, words):
-        return " ".join([new_word if word == word_to_replace else word for word in words])
+    def _replace_word_in_text(self, word_to_replace, new_word, text):
+        # return " ".join([new_word if word == word_to_replace else word for word in words])
+        pattern = re.compile(
+            rf"\b{re.escape(word_to_replace)}\b",
+            re.IGNORECASE,
+        )
+        
+        def replace(match):
+            original = match.group(0)
+            
+            if original.isupper():
+                return new_word.upper()
+            
+            if original[0].isupper():
+                return new_word[0].upper() + new_word[1:]
+            
+            return new_word
+
+        return pattern.sub(replace, text)
 
 
     _bias_type_to_func = {
@@ -705,6 +747,11 @@ class _SentenceDebiasDataset:
     def load_attributes(self, bias_type):
         with open(self._path_to_bias_attributes, "r", encoding="UTF-8") as f:
             self._attribute_words = json.load(f)[self._bias_type]
+        self._attribute_words_flat = [
+            word
+            for pair in self._attribute_words
+            for word in pair
+        ]
         
     def load_examples(self):
         raise NotImplementedError("load_examples method not implemented.")
@@ -744,6 +791,6 @@ class _GenericDataset(_SentenceDebiasDataset):
         ):
             sentence = sentence.lower()
             sentence = sentence.strip()
-            examples = self._augment_func(self, sentence, examples, self._attribute_words)
+            examples = self._augment_func(self, sentence, examples, self._attribute_words, self._attribute_words_flat)
 
         return examples
