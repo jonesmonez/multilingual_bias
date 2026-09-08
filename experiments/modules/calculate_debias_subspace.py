@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import nltk
 import torch
@@ -31,8 +32,8 @@ def _tokenize_paragraph(paragraph: str, lang: str):
     if lang == "zh_CN":
         sentence_list = tokenize(paragraph)
         return sentence_list
-    else:
-        nltk_lang = lang_map.get(lang, "english")
+    
+    nltk_lang = lang_map.get(lang, "english")
     return [
         sentence.lower()
         for sentence in nltk.sent_tokenize(paragraph, nltk_lang)
@@ -627,7 +628,7 @@ class _SentenceDebiasDataset:
             if r1_word.casefold() in words_normalized:
                 r1_example = text
                 r2_example = self._replace_word_in_text(r1_word, r2_word, text)
-                r3_example = self._replace_word_in_text(r1_word, r3_word, words)
+                r3_example = self._replace_word_in_text(r1_word, r3_word, text)
 
                 examples.append(
                     {
@@ -650,7 +651,7 @@ class _SentenceDebiasDataset:
                     }
                 )
 
-            if r3_word in words:
+            if r3_word.casefold() in words_normalized:
                 r1_example = self._replace_word_in_text(r3_word, r1_word, text)
                 r2_example = self._replace_word_in_text(r3_word, r2_word, text)
                 r3_example = text
