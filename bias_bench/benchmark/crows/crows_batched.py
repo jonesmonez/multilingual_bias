@@ -712,6 +712,7 @@ class CrowSPairsBatchedRunner:
             keep_default_na=False,
             dtype=str,
         )
+        df["bias_type"] = df["bias_type"].str.lower()
 
         if self._bias_type is not None:
             df = df[df["bias_type"].isin(self._bias_type)]

@@ -109,7 +109,7 @@ class CrowSPairsRunner:
             
             for index, data in df_data.iterrows():
                 direction = data["direction"]
-                bias = data["bias_type"]
+                bias = data["bias_type"].lower()
 
                 sent1, sent2, sentId = data["sent1"], data["sent2"], data["id"]
 
@@ -241,7 +241,7 @@ class CrowSPairsRunner:
         with tqdm(total=total, leave=False) as pbar:
             for index, data in df_data.iterrows():
                 direction = data["direction"]
-                bias = data["bias_type"]
+                bias = data["bias_type"].lower()
 
                 sent1, sent2 = data["sent1"], data["sent2"]
 
@@ -458,6 +458,8 @@ class CrowSPairsRunner:
             keep_default_na=False,
             dtype=str,
         )
+        
+        df["bias_type"] = df["bias_type"].str.lower()
 
         if self._bias_type is not None:
             df = df[df["bias_type"].isin(self._bias_type)]
