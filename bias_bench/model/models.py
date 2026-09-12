@@ -6,7 +6,10 @@ import transformers
 #from bias_bench.debias.self_debias.modeling import GPT2Wrapper
 #from bias_bench.debias.self_debias.modeling import MaskedLMWrapper
 
-
+class AutoModel:
+    def __new__(self, model_name_or_path):
+        return transformers.AutoModel.from_pretrained(model_name_or_path)
+    
 class BertModel:
     def __new__(self, model_name_or_path):
         return transformers.BertModel.from_pretrained(model_name_or_path)
