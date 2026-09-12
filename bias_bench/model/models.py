@@ -29,7 +29,10 @@ class GPT2Model:
     def __new__(self, model_name_or_path):
         return transformers.GPT2Model.from_pretrained(model_name_or_path)
 
-
+class ModernBertModel:
+    def __new__(self, model_name_or_path):
+        return transformers.AutoModel.from_pretrained(model_name_or_path)
+    
 class BertForMaskedLM:
     def __new__(self, model_name_or_path):
         return transformers.BertForMaskedLM.from_pretrained(model_name_or_path)
@@ -48,6 +51,11 @@ class RobertaForMaskedLM:
 class GPT2LMHeadModel:
     def __new__(self, model_name_or_path):
         return transformers.GPT2LMHeadModel.from_pretrained(model_name_or_path)
+    
+class ModernBertForMaskedLM:
+    def __new__(self, model_name_or_path):
+        model = transformers.AutoModelForMaskedLM.from_pretrained(model_name_or_path)
+        return model
 
 class _DensrayModel:
     def __init__(self, model_name_or_path, bias_direction):
@@ -101,16 +109,26 @@ class _INLPModel:
     def __init__(self, model_name_or_path, projection_matrix):
         def _hook(module, input_, output, projection_matrix):
             # Debias the last hidden state.
-            x = output["last_hidden_state"]
+            x = output.last_hidden_state
 
-            # Ensure that everything is on the same device.
-            projection_matrix = projection_matrix.to(x.device)
 
-            for t in range(x.size(1)):
-                x[:, t] = torch.matmul(projection_matrix, x[:, t].T).T
+            projection_matrix = projection_matrix.to(
+                device=x.device,
+                dtype=x.dtype,
+            )
+
+            # x: [batch, seq_len, hidden_size]
+            # P: [hidden_size, hidden_size]
+            x = torch.matmul(x, projection_matrix.T)
+
+            # # Ensure that everything is on the same device.
+            # projection_matrix = projection_matrix.to(x.device)
+
+            # for t in range(x.size(1)):
+            #     x[:, t] = torch.matmul(projection_matrix, x[:, t].T).T
 
             # Update the output.
-            output["last_hidden_state"] = x
+            output.last_hidden_state = x
 
             return output
 
@@ -162,6 +180,13 @@ class DensrayDebiasBertForMaskedLM(_DensrayModel):
         model = transformers.BertForMaskedLM.from_pretrained(model_name_or_path)
         model.bert.register_forward_hook(self.func)
         return model
+    
+class DensRayModernBertForMaskedLM(_DensrayModel):
+    def __new__(self, model_name_or_path, bias_direction):
+        super().__init__(self, model_name_or_path, bias_direction)
+        model = transformers.AutoModelForMaskedLM.from_pretrained(model_name_or_path)
+        model.model.register_forward_hook(self.func)
+        return model
 
 class SentenceDebiasBertForMaskedLM(_SentenceDebiasModel):
     def __new__(self, model_name_or_path, bias_direction):
@@ -194,6 +219,12 @@ class SentenceDebiasGPT2LMHeadModel(_SentenceDebiasModel):
         model.transformer.register_forward_hook(self.func)
         return model
 
+class SentenceDebiasModernBertForMaskedLM(_SentenceDebiasModel):
+    def __new__(self, model_name_or_path, bias_direction):
+        super().__init__(self, model_name_or_path, bias_direction)
+        model = transformers.AutoModelForMaskedLM.from_pretrained(model_name_or_path)
+        model.model.register_forward_hook(self.func)
+        return model
 
 class INLPBertModel(_INLPModel):
     def __new__(self, model_name_or_path, projection_matrix):
@@ -306,6 +337,10 @@ class CDAGPT2LMHeadModel:
         model = transformers.GPT2LMHeadModel.from_pretrained(model_name_or_path)
         return model
 
+class CDAModernBertForMaskedLM:
+    def __new__(self, model_name_or_path):
+        model =  transformers.AutoModelForMaskedLM.from_pretrained(model_name_or_path)
+        return model
 
 class DropoutBertModel:
     def __new__(self, model_name_or_path):
@@ -354,6 +389,10 @@ class DropoutGPT2LMHeadModel:
         model = transformers.GPT2LMHeadModel.from_pretrained(model_name_or_path)
         return model
 
+class DropoutModernBertForMaskedLM:
+    def __new__(self, model_name_or_path):
+        model = transformers.AutoModelForMaskedLM.from_pretrained(model_name_or_path)
+        return model
 
 class BertForSequenceClassification:
     def __new__(self, model_name_or_path, config):
@@ -464,6 +503,31 @@ class INLPGPT2ForSequenceClassification(_INLPModel):
             model_name_or_path, config=config
         )
         model.transformer.register_forward_hook(self.func)
+        return model
+    
+class INLPModernBertModel(_INLPModel):
+    def __new__(self, model_name_or_path, projection_matrix):
+        super().__init__(self, model_name_or_path, projection_matrix)
+        model = transformers.AutoModel.from_pretrained(model_name_or_path)
+        model.register_forward_hook(self.func)
+        return model
+    
+class INLPModernBertForMaskedLM(_INLPModel):
+    def __new__(self, model_name_or_path, projection_matrix):
+        super().__init__(
+            self,
+            model_name_or_path,
+            projection_matrix
+        )
+
+        model = transformers.AutoModelForMaskedLM.from_pretrained(
+            model_name_or_path
+        )
+
+        # Hook auf den ModernBERT-Encoder,
+        # bevor head + decoder die Logits erzeugen.
+        model.model.register_forward_hook(self.func)
+
         return model
 
 

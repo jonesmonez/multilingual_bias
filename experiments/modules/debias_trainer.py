@@ -360,13 +360,25 @@ class BaseDebiasTrainer:
 
     def _get_model_config(self, dropout_debias: bool = False):
         config = AutoConfig.from_pretrained(self.model_name_or_path)
-        if dropout_debias:
-            if config.model_type in ("bert", "roberta"):
+        
+        if config.model_type in ("bert", "roberta"):
+            if dropout_debias:
                 config.hidden_dropout_prob = 0.20
                 config.attention_probs_dropout_prob = 0.15
             else:
                 config.hidden_dropout_prob = 0.05
                 config.attention_probs_dropout_prob = 0.05
+                
+        elif config.model_type == "modernbert":
+            if dropout_debias:
+                config.embedding_dropout = 0.20
+                config.attention_dropout = 0.15
+                config.mlp_dropout = 0.20
+            else:
+                config.embedding_dropout = 0.05
+                config.attention_dropout = 0.05
+                config.mlp_dropout = 0.05
+                    
         return config
 
 class DropoutTrainer(BaseDebiasTrainer):
