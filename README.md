@@ -41,14 +41,12 @@ The different debiasing techniques require different amounts of Wikipedia data. 
 > [!NOTE]
 > For the Maltese version, the 100% dataset was used because Maltese is a low-resource language.
 
-**Comming soon...:** ~~If you want to use different splits or, for example, the full 10% of the English Wikipedia dataset, you can use the `data/text/create_corpora.py` script to generate the corpora according to your requirements.~~
+If you want to use different splits or, for example, the full 10% of the English Wikipedia dataset, you can use the `data/text/create_corpora.py` script to generate the corpora according to your requirements. In the `data/text/create_corpora.ipynb` the corpora are create as they are used in this project.
 
 
 ## The new Modules
-The new Modules can be found in `experiments/modules`. They have to be used in order to use the new languages.
+The new Modules can be found in `experiments/modules`. They have to be used in order to use the new languages. To use them you could use the `debias.ipynb` in the root of this repo. It applies all debiaing techniques. After that the bias scores can be calculated with the `score_calculation.ipynb`.
 
-> [!NOTE]
-> The rest of the explanation is **coming soon**.
 
 ## Acknowledgements
 This code is based on the GitHub repository of Reusens, M., Borchert, P., Mieskes, M., De Weert, J., & Baesens, B. (2023), [Investigating Bias in Multilingual Language Models: Cross-Lingual Transfer of Debiasing Techniques](https://github.com/manon-reusens/multilingual_bias). Their work, in turn, is based on Meade, N., Poole-Dayan, E., & Reddy, S. (2022, May). [An Empirical Survey of the Effectiveness of Debiasing Techniques for Pre-trained Language Models.](https://github.com/McGill-NLP/bias-bench/tree/main). In Proceedings of the 60th Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) (pp. 1878-1898). arXiv preprint arXiv:2110.08527.
