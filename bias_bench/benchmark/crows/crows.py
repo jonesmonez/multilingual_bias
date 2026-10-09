@@ -1,15 +1,14 @@
 import csv
 import difflib
 import warnings
-
-# Temporarily ignore pandas deprecation warnings.
-warnings.simplefilter(action="ignore", category=FutureWarning)
 import torch
 import torch.nn.functional as F
 import pandas as pd
 import numpy as np
-from tqdm import tqdm
-
+try:
+    from tqdm.notebook import tqdm
+except ImportError:
+    from tqdm import tqdm
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -45,6 +44,9 @@ class CrowSPairsRunner:
         bias_type=None,
         sample="false",
         seed=0,
+        verbose=True,
+        lang_eval: str | None = None,
+        lang_debias: str | None = None,
     ):
         """Initializes CrowS-Pairs benchmark runner.
 
@@ -61,9 +63,15 @@ class CrowSPairsRunner:
         self._is_generative = is_generative
         self._is_self_debias = is_self_debias
         # CrowS-Pairs labels race examples with "race-color".
-        self._bias_type = bias_type if bias_type != "race" else "race-color"
+        if isinstance(bias_type, str):
+            self._bias_type = [bias_type]
+        else:
+            self._bias_type = bias_type
         self.sample=sample
         self.seed=seed
+        self.verbose=verbose
+        self.lang_eval=lang_eval
+        self.lang_debias=lang_debias
 
     def __call__(self):
         if self._is_generative:
@@ -75,10 +83,10 @@ class CrowSPairsRunner:
     def _likelihood_score(self):
         """Evaluates against the CrowS-Pairs dataset using likelihood scoring."""
         df_data = self._read_data(self._input_file)
-        df_data['prob_mask_sent1']=np.nan
-        df_data['prob_mask_sent2']=np.nan
-        df_data['score1']=np.nan
-        df_data['score2']=np.nan
+        df_data['prob_mask_sent1']=None
+        df_data['prob_mask_sent2']=None
+        df_data['score1']=None
+        df_data['score2']=None
 
 
         # Use GPU, if available.
@@ -87,9 +95,103 @@ class CrowSPairsRunner:
         else:
             self._model.to(device)
 
-        # Score each sentence.
-        # Each row in the dataframe has the sentid and score for pro and anti-stereo.
+        total_stereo, total_antistereo = 0, 0
+        stereo_score, antistereo_score = 0, 0
+
+        N = 0
+        neutral = 0
+        total = len(df_data.index)
+        skipped = []
+        rows = []
+        with tqdm(total=total, leave=False) as pbar:
+            if self.sample=="true":
+                df_data = df_data.sample(n=40,random_state=self.seed)
+            
+            for index, data in df_data.iterrows():
+                direction = data["direction"]
+                bias = data["bias_type"].lower()
+
+                sent1, sent2, sentId = data["sent1"], data["sent2"], data["id"]
+
+                sent1_token_ids = self._tokenizer.encode(sent1, return_tensors="pt").to(
+                    device
+                )
+                sent2_token_ids = self._tokenizer.encode(sent2, return_tensors="pt").to(
+                    device
+                )
+
+                # Get spans of non-changing tokens
+                template1, template2 = _get_span(
+                    sent1_token_ids[0], sent2_token_ids[0], "diff"
+                )
+
+                pbar.update(1)
+
+                if not template1 or not template2:
+                    skipped.append(str(index))
+                    continue
+                score1,list_prob_mask1 = self._average_log_probability(sent1_token_ids, template1)
+                score2,list_prob_mask2 = self._average_log_probability(sent2_token_ids, template2)
+                if self._bias_type is not None:
+                    description = "Evaluating "
+                    if self.lang_eval is not None:
+                        description += f"{self.lang_eval} "
+                    if self.lang_debias is not None:
+                        description += f"(debiased with {self.lang_debias}) "
+                    description += f"{self._bias_type} examples"
+                    pbar.set_description(description)
+                pbar.set_postfix({
+                    "CrowS Index": sentId,
+                })
+
+                df_data.loc[index, 'prob_mask_sent1']=str(list_prob_mask1)
+                df_data.loc[index, 'prob_mask_sent2']=str(list_prob_mask2)
+                df_data.loc[index, 'score1']=np.exp(score1)
+                df_data.loc[index, 'score2']=np.exp(score2)
+
+                score1 = round(score1, 3)
+                score2 = round(score2, 3)
+
+                N += 1
+                pair_score = 0
+                if score1 == score2:
+                    neutral += 1
+                else:
+                    if direction == "stereo":
+                        total_stereo += 1
+                        if score1 > score2:
+                            stereo_score += 1
+                            pair_score = 1
+                    elif direction == "antistereo":
+                        total_antistereo += 1
+                        if score2 > score1:
+                            antistereo_score += 1
+                            pair_score = 1
+
+                sent_more, sent_less = "", ""
+                if direction == "stereo":
+                    sent_more = data["sent1"]
+                    sent_less = data["sent2"]
+                    sent_more_score = score1
+                    sent_less_score = score2
+                else:
+                    sent_more = data["sent2"]
+                    sent_less = data["sent1"]
+                    sent_more_score = score2
+                    sent_less_score = score1
+                
+                rows.append({
+                    "sent_more": sent_more,
+                    "sent_less": sent_less,
+                    "sent_more_score": sent_more_score,
+                    "sent_less_score": sent_less_score,
+                    "score": pair_score,
+                    "stereo_antistereo": direction,
+                    "bias_type": bias,
+                })
+
         df_score = pd.DataFrame(
+            rows,
             columns=[
                 "sent_more",
                 "sent_less",
@@ -98,192 +200,27 @@ class CrowSPairsRunner:
                 "score",
                 "stereo_antistereo",
                 "bias_type",
-            ]
+            ],
         )
 
-        total_stereo, total_antistereo = 0, 0
-        stereo_score, antistereo_score = 0, 0
-
-        N = 0
-        neutral = 0
-        total = len(df_data.index)
-        with tqdm(total=total) as pbar:
-            if self.sample=="true":
-                for index, data in df_data.loc[df_data['bias_type']==self._bias_type].sample(n=40,random_state=self.seed).iterrows():
-                    direction = data["direction"]
-                    bias = data["bias_type"]
-
-                    assert bias == self._bias_type
-
-                    sent1, sent2 = data["sent1"], data["sent2"]
-
-                    sent1_token_ids = self._tokenizer.encode(sent1, return_tensors="pt").to(
-                        device
-                    )
-                    sent2_token_ids = self._tokenizer.encode(sent2, return_tensors="pt").to(
-                        device
-                    )
-
-                    # Get spans of non-changing tokens
-                    template1, template2 = _get_span(
-                        sent1_token_ids[0], sent2_token_ids[0], "diff"
-                    )
-
-                    if not template1 or not template2:
-                        print(f"Skipping example {index}.")
-                        continue
-                    print(sent1)
-                    score1,list_prob_mask1 = self._average_log_probability(sent1_token_ids, template1)
-                    print(list_prob_mask1)
-                    print(sent2)
-                    score2,list_prob_mask2 = self._average_log_probability(sent2_token_ids, template2)
-                    print(list_prob_mask2)
-
-                    df_data['prob_mask_sent1'].iloc[index]=str(list_prob_mask1)
-                    df_data['prob_mask_sent2'].iloc[index]=str(list_prob_mask2)
-                    df_data['score1'].iloc[index]=np.exp(score1)
-                    df_data['score2'].iloc[index]=np.exp(score2)
-
-                    score1 = round(score1, 3)
-                    score2 = round(score2, 3)
-
-                    N += 1
-                    pair_score = 0
-                    pbar.update(1)
-                    if score1 == score2:
-                        neutral += 1
-                    else:
-                        if direction == "stereo":
-                            total_stereo += 1
-                            if score1 > score2:
-                                stereo_score += 1
-                                pair_score = 1
-                        elif direction == "antistereo":
-                            total_antistereo += 1
-                            if score2 > score1:
-                                antistereo_score += 1
-                                pair_score = 1
-
-                    sent_more, sent_less = "", ""
-                    if direction == "stereo":
-                        sent_more = data["sent1"]
-                        sent_less = data["sent2"]
-                        sent_more_score = score1
-                        sent_less_score = score2
-                    else:
-                        sent_more = data["sent2"]
-                        sent_less = data["sent1"]
-                        sent_more_score = score2
-                        sent_less_score = score1
-
-                    df_score = df_score.append(
-                        {
-                            "sent_more": sent_more,
-                            "sent_less": sent_less,
-                            "sent_more_score": sent_more_score,
-                            "sent_less_score": sent_less_score,
-                            "score": pair_score,
-                            "stereo_antistereo": direction,
-                            "bias_type": bias,
-                        },
-                        ignore_index=True,
-                    )
-            else: 
-                for index, data in df_data.loc[df_data['bias_type']==self._bias_type].iterrows():
-                    direction = data["direction"]
-                    bias = data["bias_type"]
-
-                    assert bias == self._bias_type
-
-                    sent1, sent2 = data["sent1"], data["sent2"]
-
-                    sent1_token_ids = self._tokenizer.encode(sent1, return_tensors="pt").to(
-                        device
-                    )
-                    sent2_token_ids = self._tokenizer.encode(sent2, return_tensors="pt").to(
-                        device
-                    )
-
-                    # Get spans of non-changing tokens
-                    template1, template2 = _get_span(
-                        sent1_token_ids[0], sent2_token_ids[0], "diff"
-                    )
-
-                    if not template1 or not template2:
-                        print(f"Skipping example {index}.")
-                        continue
-                    print(sent1)
-                    score1,list_prob_mask1 = self._average_log_probability(sent1_token_ids, template1)
-                    print(list_prob_mask1)
-                    print(sent2)
-                    score2,list_prob_mask2 = self._average_log_probability(sent2_token_ids, template2)
-                    print(list_prob_mask2)
-
-                    df_data['prob_mask_sent1'].iloc[index]=str(list_prob_mask1)
-                    df_data['prob_mask_sent2'].iloc[index]=str(list_prob_mask2)
-                    df_data['score1'].iloc[index]=np.exp(round(score1, 3))
-                    df_data['score2'].iloc[index]=np.exp(round(score2, 3))
-
-
-                    score1 = round(score1, 3)
-                    score2 = round(score2, 3)
-
-                    N += 1
-                    pair_score = 0
-                    pbar.update(1)
-                    if score1 == score2:
-                        neutral += 1
-                    else:
-                        if direction == "stereo":
-                            total_stereo += 1
-                            if score1 > score2:
-                                stereo_score += 1
-                                pair_score = 1
-                        elif direction == "antistereo":
-                            total_antistereo += 1
-                            if score2 > score1:
-                                antistereo_score += 1
-                                pair_score = 1
-
-                    sent_more, sent_less = "", ""
-                    if direction == "stereo":
-                        sent_more = data["sent1"]
-                        sent_less = data["sent2"]
-                        sent_more_score = score1
-                        sent_less_score = score2
-                    else:
-                        sent_more = data["sent2"]
-                        sent_less = data["sent1"]
-                        sent_more_score = score2
-                        sent_less_score = score1
-
-                    df_score = df_score.append(
-                        {
-                            "sent_more": sent_more,
-                            "sent_less": sent_less,
-                            "sent_more_score": sent_more_score,
-                            "sent_less_score": sent_less_score,
-                            "score": pair_score,
-                            "stereo_antistereo": direction,
-                            "bias_type": bias,
-                        },
-                        ignore_index=True,
-                    )
-
-        print("=" * 100)
-        print("Total examples:", N)
-        print("Metric score:", round((stereo_score + antistereo_score) / N * 100, 2))
-        print("Stereotype score:", round(stereo_score / total_stereo * 100, 2))
-        if antistereo_score != 0:
-            print(
-                "Anti-stereotype score:",
-                round(antistereo_score / total_antistereo * 100, 2),
-            )
-        print("Num. neutral:", round(neutral / N * 100, 2))
-        print("=" * 100)
-        print()
-        print(df_data)
-        return round((stereo_score + antistereo_score) / N * 100, 2),df_data
+        if self.verbose:
+            print("=" * 100)
+            print("Total examples:", N)
+            if len(skipped) > 0:
+                print("Skipped examples:", ", ".join(skipped))
+            print("Metric score:", round((stereo_score + antistereo_score) / N * 100, 2))
+            print("Stereotype score:", round(stereo_score / total_stereo * 100, 2))
+            if antistereo_score != 0:
+                print(
+                    "Anti-stereotype score:",
+                    round(antistereo_score / total_antistereo * 100, 2),
+                )
+            print("Num. neutral:", round(neutral / N * 100, 2))
+            print("=" * 100)
+        
+        if N == 0:
+            return 0.0, df_data
+        return round((stereo_score + antistereo_score) / N * 100, 2), df_data
 
     def _likelihood_score_generative(self):
         df_data = self._read_data(self._input_file)
@@ -294,31 +231,17 @@ class CrowSPairsRunner:
         else:
             self._model.to(device)
 
-        # Score each sentence.
-        # Each row in the dataframe has the sentid and score for pro and anti-stereo.
-        df_score = pd.DataFrame(
-            columns=[
-                "sent_more",
-                "sent_less",
-                "sent_more_score",
-                "sent_less_score",
-                "score",
-                "stereo_antistereo",
-                "bias_type",
-            ]
-        )
-
         total_stereo, total_antistereo = 0, 0
         stereo_score, antistereo_score = 0, 0
 
         N = 0
         neutral = 0
         total = len(df_data.index)
-
-        with tqdm(total=total) as pbar:
+        rows = []
+        with tqdm(total=total, leave=False) as pbar:
             for index, data in df_data.iterrows():
                 direction = data["direction"]
-                bias = data["bias_type"]
+                bias = data["bias_type"].lower()
 
                 sent1, sent2 = data["sent1"], data["sent2"]
 
@@ -357,32 +280,44 @@ class CrowSPairsRunner:
                     sent_more_score = score2
                     sent_less_score = score1
 
-                df_score = df_score.append(
-                    {
-                        "sent_more": sent_more,
-                        "sent_less": sent_less,
-                        "sent_more_score": sent_more_score,
-                        "sent_less_score": sent_less_score,
-                        "score": pair_score,
-                        "stereo_antistereo": direction,
-                        "bias_type": bias,
-                    },
-                    ignore_index=True,
+                rows.append({
+                    "sent_more": sent_more,
+                    "sent_less": sent_less,
+                    "sent_more_score": sent_more_score,
+                    "sent_less_score": sent_less_score,
+                    "score": pair_score,
+                    "stereo_antistereo": direction,
+                    "bias_type": bias,
+                })
+                
+        df_score = pd.DataFrame(
+            rows,
+            columns=[
+                "sent_more",
+                "sent_less",
+                "sent_more_score",
+                "sent_less_score",
+                "score",
+                "stereo_antistereo",
+                "bias_type",
+            ],
+        )
+                
+        if self.verbose:
+            print("=" * 100)
+            print("Total examples:", N)
+            print("Metric score:", round((stereo_score + antistereo_score) / N * 100, 2))
+            print("Stereotype score:", round(stereo_score / total_stereo * 100, 2))
+            if antistereo_score != 0:
+                print(
+                    "Anti-stereotype score:",
+                    round(antistereo_score / total_antistereo * 100, 2),
                 )
+            print("Num. neutral:", round(neutral / N * 100, 2))
+            print("=" * 100)
 
-        print("=" * 100)
-        print("Total examples:", N)
-        print("Metric score:", round((stereo_score + antistereo_score) / N * 100, 2))
-        print("Stereotype score:", round(stereo_score / total_stereo * 100, 2))
-        if antistereo_score != 0:
-            print(
-                "Anti-stereotype score:",
-                round(antistereo_score / total_antistereo * 100, 2),
-            )
-        print("Num. neutral:", round(neutral / N * 100, 2))
-        print("=" * 100)
-        print()
-
+        if N == 0:
+            return 0.0, df_data
         return round((stereo_score + antistereo_score) / N * 100, 2)
 
     def _joint_log_probability(self, tokens):
@@ -455,82 +390,91 @@ class CrowSPairsRunner:
     def _average_log_probability(self, token_ids, spans):
         probs = []
         preds_mask_all=[]
-        for position in spans:
-            # Mask the position.
-            masked_token_ids = token_ids.clone().to(device)
-            masked_token_ids[:, position] = self._tokenizer.mask_token_id
+        
+        # Handle empty spans case
+        if len(spans) == 0:
+            return 0.0, []
 
-            with torch.no_grad():
-                if self._is_self_debias:
-                    # Get the logits for the masked token using self-debiasing.
-                    debiasing_prefixes = [DEBIASING_PREFIXES[self._bias_type]]
-                    hidden_states = self._model.get_token_logits_self_debiasing(
-                        masked_token_ids,
-                        debiasing_prefixes=debiasing_prefixes,
-                        decay_constant=50,
-                        epsilon=0.01,
-                    )
-                else:
-                    hidden_states = self._model(masked_token_ids)["logits"]
-                    hidden_states = hidden_states.squeeze(0)
-                    hidden_states = hidden_states[position]
+        # Create batch where each example masks a different position
+        batch_size = len(spans)
+        masked_token_ids_batch = token_ids.repeat(batch_size, 1)  # [batch_size, seq_len]
 
-            target_id = token_ids[0][position]
-            log_probs = F.log_softmax(hidden_states, dim=0)[target_id]
-            probs.append(log_probs.item())
+        # Mask different positions in each batch item
+        for i, position in enumerate(spans):
+            masked_token_ids_batch[i, position] = self._tokenizer.mask_token_id
 
-            probab=F.softmax(hidden_states,dim=0)
+        # Move entire batch to device ONCE
+        masked_token_ids_batch = masked_token_ids_batch.to(device)
 
-            top_k_weights, top_k_indices = torch.topk(probab,5 , sorted=True)
-            df_prob=pd.DataFrame()
-            pred_span={} 
-            for i, pred_idx in enumerate(top_k_indices):
-                predicted_token = self._tokenizer.convert_ids_to_tokens([pred_idx])[0]
-                token_weight = top_k_weights[i]
-                #print("[MASK]: '%s'"%predicted_token, " | weights:", float(token_weight))
-                pred_span[predicted_token]=float(token_weight)
-            preds_mask_all.append(pred_span)
+        with torch.no_grad():
+            if self._is_self_debias:
+                # Get logits for masked tokens using self-debiasing (batched)
+                debiasing_prefixes = [DEBIASING_PREFIXES[self._bias_type]]
+                hidden_states_batch = self._model.get_token_logits_self_debiasing(
+                    masked_token_ids_batch,
+                    debiasing_prefixes=debiasing_prefixes,
+                    decay_constant=50,
+                    epsilon=0.01,
+                )
+                # Assuming the method returns logits ready for softmax (like original code used hidden_states directly)
+                logits_batch = hidden_states_batch
+            else:
+                # Standard model forward pass (batched)
+                logits_batch = self._model(masked_token_ids_batch)["logits"]  # [batch_size, seq_len, vocab_size]
+
+            # For each item in batch, get logits at ITS specific masked position
+            batch_indices = torch.arange(batch_size, device=device)
+            selected_logits = logits_batch[batch_indices, spans, :]  # [batch_size, vocab_size]
+
+            # Process all positions at once
+            log_probs_batch = F.log_softmax(selected_logits, dim=-1)  # [batch_size, vocab_size]
+            target_ids = token_ids[0][spans]  # [batch_size] - same token_ids[0] for all since same sentence
+            batch_log_probs = log_probs_batch[torch.arange(batch_size, device=device), target_ids]  # [batch_size]
+
+            # Get top-k predictions for all positions
+            probs_batch = F.softmax(selected_logits, dim=-1)  # [batch_size, vocab_size]
+            top_k_weights_batch, top_k_indices_batch = torch.topk(probs_batch, 5, dim=-1)  # [batch_size, 5]
+
+            # Extract results for each item in batch
+            for i in range(batch_size):
+                probs.append(batch_log_probs[i].item())
+
+                pred_span = {}
+                for k in range(5):
+                    token_idx = top_k_indices_batch[i, k].item()
+                    token_weight = top_k_weights_batch[i, k].item()
+                    predicted_token = self._tokenizer.convert_ids_to_tokens([token_idx])[0]
+                    pred_span[predicted_token] = token_weight
+                preds_mask_all.append(pred_span)
 
         score = np.mean(probs)
 
         return score,preds_mask_all
 
     def _read_data(self, input_file):
-        """Load data into pandas DataFrame format."""
-
-        df_data = pd.DataFrame(columns=["sent1", "sent2", "direction", "bias_type"])
+        df = pd.read_csv(
+            input_file,
+            usecols=["id", "sent_more", "sent_less", "stereo_antistereo", "bias_type"],
+            keep_default_na=False,
+            dtype=str,
+        )
+        
+        df["bias_type"] = df["bias_type"].str.lower()
 
         if self._bias_type is not None:
-            print(f"Evaluating {self._bias_type} examples.")
+            df = df[df["bias_type"].isin(self._bias_type)]
 
-        with open(input_file) as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                direction, gold_bias = "_", "_"
-                direction = row["stereo_antistereo"]
-                bias_type = row["bias_type"]
+        df = df.rename(
+            columns={
+                "sent_more": "sent1",
+                "sent_less": "sent2",
+                "stereo_antistereo": "direction",
+            }
+        )
 
-                if self._bias_type is not None and bias_type != self._bias_type:
-                    continue
+        df = df[["sent1", "sent2", "direction", "bias_type", "id"]]
 
-                sent1, sent2 = "", ""
-                if direction == "stereo":
-                    sent1 = row["sent_more"]
-                    sent2 = row["sent_less"]
-                else:
-                    sent1 = row["sent_less"]
-                    sent2 = row["sent_more"]
-
-                df_item = {
-                    "sent1": sent1,
-                    "sent2": sent2,
-                    "direction": direction,
-                    "bias_type": bias_type,
-                }
-                df_data = df_data.append(df_item, ignore_index=True)
-
-        return df_data
-
+        return df
 
 def _get_span(seq1, seq2, operation):
     """This function extract spans that are shared between two sequences."""

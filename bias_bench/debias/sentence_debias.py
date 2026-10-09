@@ -13,6 +13,11 @@ def compute_gender_subspace(data, model, tokenizer, batch_size=32):
     """
     # Use GPU, if available.
     model.to(device)
+    
+    # Add multi-GPU support
+    if torch.cuda.device_count() > 1:
+        print(f"Using {torch.cuda.device_count()} GPUs for encoding!")
+        model = torch.nn.DataParallel(model)
 
     all_embeddings_male = []
     all_embeddings_female = []
@@ -97,6 +102,11 @@ def compute_race_subspace(data, model, tokenizer, batch_size=32):
     """
     # Use GPU, if available.
     model.to(device)
+    
+    # Add multi-GPU support
+    if torch.cuda.device_count() > 1:
+        print(f"Using {torch.cuda.device_count()} GPUs for encoding!")
+        model = torch.nn.DataParallel(model)
 
     all_embeddings_r1 = []
     all_embeddings_r2 = []
@@ -199,6 +209,11 @@ def compute_religion_subspace(data, model, tokenizer, batch_size=32):
     """
     # Use GPU, if available.
     model.to(device)
+    
+    # Add multi-GPU support
+    if torch.cuda.device_count() > 1:
+        print(f"Using {torch.cuda.device_count()} GPUs for encoding!")
+        model = torch.nn.DataParallel(model)
 
     all_embeddings_r1 = []
     all_embeddings_r2 = []

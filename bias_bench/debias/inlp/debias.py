@@ -6,7 +6,10 @@ import warnings
 
 import numpy as np
 import scipy
-from tqdm import tqdm
+try:
+    from tqdm.notebook import tqdm
+except ImportError:
+    from tqdm import tqdm
 
 from bias_bench.debias.inlp import classifier
 
@@ -117,9 +120,8 @@ def get_debiasing_projection(
     rowspace_projections = []
     Ws = []
 
-    pbar = tqdm(range(num_classifiers))
+    pbar = tqdm(range(num_classifiers), leave=False)
     for i in pbar:
-
         clf = classifier.SKlearnClassifier(classifier_class(**cls_params))
         dropout_scale = 1.0 / (1 - dropout_rate + 1e-6)
         dropout_mask = (np.random.rand(*X_train.shape) < (1 - dropout_rate)).astype(
